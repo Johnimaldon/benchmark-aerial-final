@@ -1,28 +1,39 @@
-import React, { useState, useRef, useEffect, useCallback, useMemo } from "react";
+import React, { useState, useRef, useEffect, useCallback } from "react";
 import {
   Plane, Radar, Layers, SlidersHorizontal, Columns, Upload, CheckCircle2,
   Circle, ChevronRight, MapPin, Calendar, TrendingUp, Crosshair,
   ArrowLeftRight, Building2, X, Loader2, ImagePlus, ArrowLeft, Home,
-  Share2, Link2, Copy, Check, ShieldCheck, LogOut, Satellite, FolderInput,
-  Images, Compass, Clock, ChevronDown, Download, FileText
+  Share2, Copy, Check, ShieldCheck, LogOut, Satellite, FolderInput,
+  Images, Compass, Clock, ChevronDown, Download, FileText,
+  Lock, KeyRound, Settings, Trash2, Plus, Pencil, RefreshCw, ShieldAlert,
+  Factory, Warehouse, TreePine, Eye, EyeOff, AlertCircle, UserCog
 } from "lucide-react";
 
 /* ------------------------------------------------------------------ */
 /*  Tokens                                                              */
 /* ------------------------------------------------------------------ */
 const C = {
-  bg: "#080B10",
-  panel: "#11161D",
-  panel2: "#1B222C",
-  line: "#232C38",
-  cyan: "#3ED6C4",
-  cyanDim: "#215C56",
+  bg: "#F4F7FB",
+  panel: "#FFFFFF",
+  panel2: "#EEF3F8",
+  line: "#DEE6EF",
+  cyan: "#0BA593",
+  cyanDim: "#8FDCD0",
   orange: "#FF5D2E",
-  text: "#EDF1F5",
-  muted: "#8B96A3",
-  faint: "#4F5A66",
-  ok: "#6FCF97",
+  text: "#121826",
+  muted: "#5B6672",
+  faint: "#8B96A3",
+  ok: "#1C9A5B",
 };
+
+/* ------------------------------------------------------------------ */
+/*  Icon registry — lets project icons round-trip through localStorage */
+/* ------------------------------------------------------------------ */
+const ICON_MAP = { Building2, Home, MapPin, Factory, Warehouse, TreePine };
+const ICON_OPTIONS = Object.keys(ICON_MAP);
+function resolveIcon(iconKey) {
+  return ICON_MAP[iconKey] || Building2;
+}
 
 const FONTS = `
 @import url('https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500..800&family=Plus+Jakarta+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
@@ -53,8 +64,8 @@ const FONTS = `
 }
 .card-lift:hover {
   transform: translateY(-4px);
-  box-shadow: 0 18px 40px -16px rgba(0,0,0,0.55), 0 0 0 1px rgba(62,214,196,0.15);
-  border-color: rgba(62,214,196,0.25) !important;
+  box-shadow: 0 18px 36px -18px rgba(18,24,38,0.18), 0 0 0 1px rgba(11,165,147,0.18);
+  border-color: rgba(11,165,147,0.3) !important;
 }
 .btn-modern {
   transition: transform 0.2s cubic-bezier(0.16,1,0.3,1), filter 0.2s ease, box-shadow 0.2s ease;
@@ -78,7 +89,7 @@ const FONTS = `
   position: absolute;
   left: 0; bottom: 0;
   height: 2px; width: 100%;
-  background: linear-gradient(90deg, #FF5D2E, #3ED6C4);
+  background: linear-gradient(90deg, #FF5D2E, #0BA593);
   transform: scaleX(0);
   transform-origin: left;
   transition: transform 0.3s cubic-bezier(0.16,1,0.3,1);
@@ -132,7 +143,7 @@ const SITES = [
     client: "Kestrel Development Group",
     type: "Multifamily construction",
     lat: 39.7684, lon: -86.1581,
-    icon: Building2,
+    iconKey: "Building2",
     terrain: ["#4b4536", "#3c3728"],
     bounds: { x: 40, y: 40, w: 400, h: 220 },
     roads: [{ x1: 0, y1: 250, x2: 480, y2: 250, w: 26 }],
@@ -150,7 +161,7 @@ const SITES = [
     client: "Halden Retail Partners",
     type: "Retail build-out",
     lat: 39.8012, lon: -86.1102,
-    icon: Building2,
+    iconKey: "Building2",
     terrain: ["#5a5648", "#454135"],
     bounds: { x: 30, y: 30, w: 420, h: 240 },
     roads: [{ x1: 0, y1: 60, x2: 480, y2: 60, w: 22 }, { x1: 250, y1: 0, x2: 250, y2: 300, w: 18 }],
@@ -167,7 +178,7 @@ const SITES = [
     client: "Maple Ridge Realty",
     type: "Residential listing",
     lat: 39.8467, lon: -86.2201,
-    icon: Home,
+    iconKey: "Home",
     terrain: ["#4a5636", "#3a4429"],
     bounds: { x: 60, y: 60, w: 360, h: 190 },
     roads: [{ x1: 0, y1: 40, x2: 480, y2: 40, w: 20 }],
@@ -184,7 +195,7 @@ const SITES = [
     client: "Overlook Land Holdings",
     type: "Land / grading",
     lat: 39.7211, lon: -86.0893,
-    icon: MapPin,
+    iconKey: "MapPin",
     terrain: ["#6b6144", "#554d36"],
     bounds: { x: 30, y: 30, w: 420, h: 240 },
     roads: [{ x1: 0, y1: 270, x2: 480, y2: 270, w: 24 }],
@@ -197,6 +208,117 @@ const SITES = [
 ];
 
 const W = 480, H = 300;
+
+/* ------------------------------------------------------------------ */
+/*  Access control & persistence — everything below runs client-side    */
+/*  only (no backend), so localStorage is the source of truth for       */
+/*  admin-edited project data and the current session.                  */
+/* ------------------------------------------------------------------ */
+const STORAGE_KEY_SITES = "wisconsin-aerial:sites";
+const STORAGE_KEY_SESSION = "wisconsin-aerial:session";
+
+function buildDefaultScene() {
+  return {
+    terrain: ["#5c5642", "#47422f"],
+    bounds: { x: 40, y: 40, w: 400, h: 220 },
+    roads: [{ x1: 0, y1: 260, x2: 480, y2: 260, w: 22 }],
+    buildings: [
+      { x: 90, y: 90, w: 140, h: 90, stages: [{ w: 2, c: "#8a7256" }, { w: 3, c: "#9aa3ab" }, { w: 5, c: "#caa06b" }] },
+      { x: 260, y: 110, w: 110, h: 70, stages: [{ w: 4, c: "#8a7256" }] },
+    ],
+  };
+}
+
+function defaultAccessCode(seed) {
+  return Math.abs(hashStr(seed + "-access")).toString(36).slice(0, 6).toUpperCase();
+}
+
+function generateAccessCode(seed) {
+  return Math.abs(hashStr(seed + "-" + Date.now() + "-" + Math.random())).toString(36).slice(0, 6).toUpperCase();
+}
+
+function slugify(name) {
+  return name.toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/(^-+|-+$)/g, "") || "project";
+}
+
+function uniqueId(base, existingIds) {
+  let id = base, n = 2;
+  while (existingIds.includes(id)) { id = `${base}-${n}`; n++; }
+  return id;
+}
+
+function hydrateSite(raw) {
+  return { ...raw, icon: resolveIcon(raw.iconKey) };
+}
+
+function serializeSite(site) {
+  const { icon, ...rest } = site;
+  return rest;
+}
+
+function buildDefaultSites() {
+  return SITES.map((s) => ({
+    ...s,
+    icon: resolveIcon(s.iconKey),
+    accessCode: defaultAccessCode(s.id),
+    clientAccessEnabled: true,
+    _weeks: [1, 2, 3, 4, 5, 6].map((n) => ({ n, date: WEEK_DATES[n - 1], real: false })),
+  }));
+}
+
+function loadPersistedSites() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY_SITES);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed) || !parsed.length) return null;
+    return parsed.map(hydrateSite);
+  } catch {
+    return null;
+  }
+}
+
+function persistSites(sites) {
+  try {
+    localStorage.setItem(STORAGE_KEY_SITES, JSON.stringify(sites.map(serializeSite)));
+  } catch {}
+}
+
+function loadPersistedSession() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY_SESSION);
+    const parsed = raw ? JSON.parse(raw) : null;
+    if (parsed && (parsed.role === "admin" || parsed.role === "client")) return parsed;
+  } catch {}
+  return { role: null, siteId: null };
+}
+
+function persistSession(session) {
+  try {
+    if (!session.role) localStorage.removeItem(STORAGE_KEY_SESSION);
+    else localStorage.setItem(STORAGE_KEY_SESSION, JSON.stringify(session));
+  } catch {}
+}
+
+function makeNewProject({ name, address, client, type, iconKey, lat, lon, terrain }, existingIds) {
+  const id = uniqueId(slugify(name), existingIds);
+  return {
+    id,
+    name,
+    address,
+    client,
+    type,
+    lat: Number(lat) || 0,
+    lon: Number(lon) || 0,
+    iconKey,
+    icon: resolveIcon(iconKey),
+    accessCode: defaultAccessCode(id),
+    clientAccessEnabled: true,
+    _weeks: [1, 2, 3, 4, 5, 6].map((n) => ({ n, date: WEEK_DATES[n - 1], real: false })),
+    ...buildDefaultScene(),
+    terrain,
+  };
+}
 
 /* ------------------------------------------------------------------ */
 /*  Procedural scene renderer                                           */
@@ -337,10 +459,15 @@ function diffCanvases(canvasA, canvasB) {
 /* ------------------------------------------------------------------ */
 function Badge({ children, tone = "muted" }) {
   const map = {
-    muted: { bg: "rgba(139,150,163,0.12)", fg: C.muted },
-    cyan: { bg: "rgba(62,214,196,0.14)", fg: C.cyan },
-    orange: { bg: "rgba(255,93,46,0.15)", fg: C.orange },
-    ok: { bg: "rgba(111,207,151,0.12)", fg: C.ok },
+    muted: { bg: "rgba(91,102,114,0.09)", fg: C.muted },
+    cyan: { bg: "rgba(11,165,147,0.12)", fg: C.cyan },
+    orange: { bg: "rgba(255,93,46,0.12)", fg: C.orange },
+    ok: { bg: "rgba(28,154,91,0.12)", fg: C.ok },
+    // Dark, theme-independent variants for badges placed on top of the
+    // aerial photo canvases, which stay dark/earthy regardless of app theme.
+    overlayMuted: { bg: "rgba(10,14,20,0.55)", fg: "#E7ECF2" },
+    overlayCyan: { bg: "rgba(10,14,20,0.55)", fg: "#5EEAD4" },
+    overlayOrange: { bg: "rgba(10,14,20,0.55)", fg: "#FF9166" },
   }[tone];
   return (
     <span className="font-mono text-[10px] tracking-wide uppercase px-2 py-1 rounded-md"
@@ -450,8 +577,8 @@ function SliderCompare({ before, after, labelBefore, labelAfter }) {
             <ArrowLeftRight size={14} color="#0A0E13" />
           </div>
         </div>
-        <div className="absolute top-2 left-2"><Badge tone="muted">{labelBefore}</Badge></div>
-        <div className="absolute top-2 right-2"><Badge tone="cyan">{labelAfter}</Badge></div>
+        <div className="absolute top-2 left-2"><Badge tone="overlayMuted">{labelBefore}</Badge></div>
+        <div className="absolute top-2 right-2"><Badge tone="overlayCyan">{labelAfter}</Badge></div>
       </div>
     </div>
   );
@@ -543,7 +670,7 @@ function CompareWorkspace({ site, weekA, weekB }) {
           <div className="relative w-full rounded-lg overflow-hidden" style={{ border: `1px solid ${C.line}` }}>
             <img src={imgB} className="w-full block" />
             <img src={diff.maskUrl} className="absolute inset-0 w-full h-full" style={{ opacity: opacity / 100 }} />
-            <div className="absolute top-2 right-2"><Badge tone="orange">Changed area</Badge></div>
+            <div className="absolute top-2 right-2"><Badge tone="overlayOrange">Changed area</Badge></div>
           </div>
           <div className="flex items-center gap-3 mt-3">
             <span className="font-mono text-[10px]" style={{ color: C.faint }}>OVERLAY</span>
@@ -581,9 +708,9 @@ function SiteCard({ site, onOpen, index = 0 }) {
       <div className="relative" style={{ aspectRatio: `${W}/${H}`, background: C.panel2 }}>
         {thumb ? <img src={thumb} className="w-full h-full object-cover" /> :
           <div className="w-full h-full flex items-center justify-center"><Loader2 size={16} className="animate-spin" color={C.faint} /></div>}
-        <div className="absolute top-2 left-2"><Badge tone="cyan">W{last.n} · {last.date}</Badge></div>
+        <div className="absolute top-2 left-2"><Badge tone="overlayCyan">W{last.n} · {last.date}</Badge></div>
         {pct !== null && (
-          <div className="absolute top-2 right-2"><Badge tone={pct > 4 ? "orange" : "muted"}>{pct.toFixed(1)}% Δ this week</Badge></div>
+          <div className="absolute top-2 right-2"><Badge tone={pct > 4 ? "overlayOrange" : "overlayMuted"}>{pct.toFixed(1)}% Δ this week</Badge></div>
         )}
       </div>
       <div className="p-3.5">
@@ -622,19 +749,17 @@ function Dashboard({ sites, onOpen }) {
 /* ------------------------------------------------------------------ */
 function ShareModal({ site, onClose, onPreview }) {
   const [copied, setCopied] = useState(false);
-  const token = useMemo(() => Math.abs(hashStr(site.id + "-share")).toString(36).slice(0, 8), [site.id]);
-  const link = `https://view.wisconsin-aerial.com/${site.id}/${token}`;
 
   const copy = async () => {
-    try { await navigator.clipboard.writeText(link); } catch (e) {}
+    try { await navigator.clipboard.writeText(site.accessCode); } catch (e) {}
     setCopied(true);
     setTimeout(() => setCopied(false), 1600);
   };
 
   return (
-    <div className="glass fixed inset-0 z-50 flex items-center justify-center p-5" style={{ background: "rgba(5,7,10,0.72)" }} onClick={onClose}>
+    <div className="glass fixed inset-0 z-50 flex items-center justify-center p-5" style={{ background: "rgba(18,24,38,0.45)" }} onClick={onClose}>
       <div onClick={(e) => e.stopPropagation()} className="fade-in-up w-full max-w-md rounded-2xl p-6"
-        style={{ background: C.panel, border: `1px solid ${C.line}`, boxShadow: "0 24px 60px -20px rgba(0,0,0,0.6)" }}>
+        style={{ background: C.panel, border: `1px solid ${C.line}`, boxShadow: "0 24px 60px -20px rgba(18,24,38,0.35)" }}>
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-2">
             <Share2 size={16} color={C.orange} />
@@ -643,17 +768,23 @@ function ShareModal({ site, onClose, onPreview }) {
           <button onClick={onClose}><X size={16} color={C.faint} /></button>
         </div>
         <p className="font-body text-sm mb-4" style={{ color: C.muted }}>
-          Anyone with this link gets a read-only report for <span style={{ color: C.text }}>{site.name}</span> —
+          Anyone with this access code gets a read-only report for <span style={{ color: C.text }}>{site.name}</span> —
           flight history, side-by-side captures, and change highlights. No sign-in, no access to other sites.
         </p>
-        <div className="flex items-center gap-2 rounded-lg px-3 py-2.5 mb-4" style={{ background: C.panel2, border: `1px solid ${C.line}` }}>
-          <Link2 size={13} color={C.faint} className="shrink-0" />
-          <span className="font-mono text-[11px] truncate flex-1" style={{ color: C.muted }}>{link}</span>
-          <button onClick={copy} className="btn-modern shrink-0 flex items-center gap-1 font-mono text-[10px] px-2 py-1 rounded"
-            style={{ background: copied ? "rgba(111,207,151,0.15)" : C.panel, color: copied ? C.ok : C.cyan }}>
-            {copied ? <Check size={11} /> : <Copy size={11} />} {copied ? "Copied" : "Copy"}
-          </button>
-        </div>
+        {site.clientAccessEnabled ? (
+          <div className="flex items-center gap-2 rounded-lg px-3 py-2.5 mb-4" style={{ background: C.panel2, border: `1px solid ${C.line}` }}>
+            <KeyRound size={13} color={C.faint} className="shrink-0" />
+            <span className="font-mono text-sm tracking-widest flex-1" style={{ color: C.text }}>{site.accessCode}</span>
+            <button onClick={copy} className="btn-modern shrink-0 flex items-center gap-1 font-mono text-[10px] px-2 py-1 rounded"
+              style={{ background: copied ? "rgba(28,154,91,0.12)" : C.panel2, color: copied ? C.ok : C.cyan }}>
+              {copied ? <Check size={11} /> : <Copy size={11} />} {copied ? "Copied" : "Copy"}
+            </button>
+          </div>
+        ) : (
+          <div className="flex items-center gap-2 rounded-lg px-3 py-2.5 mb-4 font-body text-xs" style={{ background: "rgba(255,93,46,0.08)", color: C.orange }}>
+            <AlertCircle size={14} /> Client access is currently disabled for this project. Enable it in Admin controls.
+          </div>
+        )}
         <button onClick={onPreview} className="btn-modern w-full py-2.5 rounded-lg font-body text-sm font-medium flex items-center justify-center gap-2"
           style={{ background: C.orange, color: "#160C05", boxShadow: "0 8px 24px -8px rgba(255,93,46,0.45)" }}>
           <Compass size={14} /> Preview what your client sees
@@ -1205,7 +1336,7 @@ function ClientStat({ icon: Icon, label, value, tone = "muted" }) {
   );
 }
 
-function ClientPortal({ site, isPreview, onExitPreview, initialTab = "interactive" }) {
+function ClientPortal({ site, mode, onExitPreview, initialTab = "interactive" }) {
   const weeks = site._weeks;
   const [selected, setSelected] = useState([weeks[weeks.length - 2].n, weeks[weeks.length - 1].n]);
   const [latestPct, setLatestPct] = useState(null);
@@ -1238,14 +1369,15 @@ function ClientPortal({ site, isPreview, onExitPreview, initialTab = "interactiv
     <div className="min-h-screen font-body" style={{ background: C.bg }}>
       <style>{FONTS}</style>
 
-      {isPreview && (
+      {(mode === "preview" || mode === "client") && (
         <div className="no-print sticky top-0 z-20 flex items-center justify-between gap-3 px-4 py-2.5 flex-wrap"
-          style={{ background: C.orange, color: "#160C05" }}>
+          style={{ background: mode === "preview" ? C.orange : C.cyan, color: mode === "preview" ? "#160C05" : "#0A0E13" }}>
           <div className="flex items-center gap-2 font-body text-xs font-medium">
-            <Compass size={13} /> Admin preview — this is exactly what {site.client} receives
+            <Compass size={13} />
+            {mode === "preview" ? <>Admin preview — this is exactly what {site.client} receives</> : <>Client access — {site.name}</>}
           </div>
           <button onClick={onExitPreview} className="flex items-center gap-1.5 font-mono text-[11px] font-semibold">
-            <LogOut size={12} /> Exit preview
+            <LogOut size={12} /> {mode === "preview" ? "Exit preview" : "Sign out"}
           </button>
         </div>
       )}
@@ -1325,29 +1457,427 @@ function ClientPortal({ site, isPreview, onExitPreview, initialTab = "interactiv
 }
 
 /* ------------------------------------------------------------------ */
+/*  Access gate — admin sign-in vs client access code                   */
+/* ------------------------------------------------------------------ */
+// Demo-grade check only: there is no backend, so this can't be a real secret.
+const ADMIN_PASSCODE = "wisconsin-admin";
+
+function AccessGate({ sites, onAdminLogin, onClientAccess }) {
+  const [mode, setMode] = useState("choose");
+  const [passcode, setPasscode] = useState("");
+  const [code, setCode] = useState("");
+  const [showPass, setShowPass] = useState(false);
+  const [error, setError] = useState(null);
+
+  const submitAdmin = (e) => {
+    e.preventDefault();
+    if (passcode.trim() === ADMIN_PASSCODE) { onAdminLogin(); return; }
+    setError("Incorrect passcode.");
+  };
+
+  const submitClient = (e) => {
+    e.preventDefault();
+    const match = sites.find((s) => s.accessCode.toLowerCase() === code.trim().toLowerCase());
+    if (!match) { setError("That access code doesn't match any project."); return; }
+    if (!match.clientAccessEnabled) { setError("Client access for this project has been disabled by the site administrator."); return; }
+    onClientAccess(match.id);
+  };
+
+  return (
+    <div className="min-h-screen flex items-center justify-center font-body p-5" style={{ background: C.bg }}>
+      <style>{FONTS}</style>
+      <div className="ambient-glow pointer-events-none fixed -top-40 -left-32 w-[560px] h-[560px] rounded-full"
+        style={{ background: "radial-gradient(circle, rgba(11,165,147,0.14), transparent 70%)", filter: "blur(10px)", zIndex: 0 }} />
+      <div className="ambient-glow pointer-events-none fixed -bottom-52 -right-40 w-[620px] h-[620px] rounded-full"
+        style={{ background: "radial-gradient(circle, rgba(255,93,46,0.10), transparent 70%)", filter: "blur(10px)", zIndex: 0, animationDelay: "-7s" }} />
+
+      <div className="fade-in-up relative z-10 w-full max-w-sm rounded-2xl p-7"
+        style={{ background: C.panel, border: `1px solid ${C.line}`, boxShadow: "0 24px 60px -24px rgba(18,24,38,0.25)" }}>
+        <div className="flex items-center gap-2 mb-6 justify-center">
+          <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ background: C.orange, boxShadow: "0 6px 18px -6px rgba(255,93,46,0.5)" }}>
+            <Crosshair size={16} color="#160C05" />
+          </div>
+          <div>
+            <div className="font-display text-sm font-semibold leading-none" style={{ color: C.text }}>Wisconsin</div>
+            <div className="font-mono text-[9px] tracking-widest" style={{ color: C.faint }}>AERIAL</div>
+          </div>
+        </div>
+
+        {mode === "choose" && (
+          <div className="space-y-2.5">
+            <button onClick={() => { setMode("admin"); setError(null); }}
+              className="btn-modern w-full flex items-center gap-3 px-4 py-3 rounded-xl font-body text-sm"
+              style={{ background: C.panel2, border: `1px solid ${C.line}`, color: C.text }}>
+              <UserCog size={16} color={C.cyan} /> Admin sign-in
+            </button>
+            <button onClick={() => { setMode("client"); setError(null); }}
+              className="btn-modern w-full flex items-center gap-3 px-4 py-3 rounded-xl font-body text-sm"
+              style={{ background: C.panel2, border: `1px solid ${C.line}`, color: C.text }}>
+              <KeyRound size={16} color={C.orange} /> I have a client access code
+            </button>
+          </div>
+        )}
+
+        {mode === "admin" && (
+          <form onSubmit={submitAdmin} className="space-y-3">
+            <label className="font-mono text-[10px] uppercase tracking-widest" style={{ color: C.faint }}>Admin passcode</label>
+            <div className="relative">
+              <Lock size={14} color={C.faint} className="absolute left-3 top-1/2 -translate-y-1/2" />
+              <input autoFocus type={showPass ? "text" : "password"} value={passcode}
+                onChange={(e) => { setPasscode(e.target.value); setError(null); }}
+                className="w-full rounded-lg pl-9 pr-9 py-2.5 font-body text-sm outline-none"
+                style={{ background: C.panel2, color: C.text, border: `1px solid ${C.line}` }} />
+              <button type="button" onClick={() => setShowPass((v) => !v)} className="absolute right-3 top-1/2 -translate-y-1/2">
+                {showPass ? <EyeOff size={14} color={C.faint} /> : <Eye size={14} color={C.faint} />}
+              </button>
+            </div>
+            {error && (
+              <div className="flex items-center gap-1.5 font-body text-xs" style={{ color: C.orange }}>
+                <AlertCircle size={13} /> {error}
+              </div>
+            )}
+            <button type="submit" className="btn-modern w-full py-2.5 rounded-lg font-body text-sm font-medium"
+              style={{ background: C.orange, color: "#160C05", boxShadow: "0 8px 24px -8px rgba(255,93,46,0.45)" }}>
+              Sign in
+            </button>
+            <button type="button" onClick={() => { setMode("choose"); setError(null); }}
+              className="w-full font-mono text-[11px]" style={{ color: C.faint }}>
+              Back
+            </button>
+          </form>
+        )}
+
+        {mode === "client" && (
+          <form onSubmit={submitClient} className="space-y-3">
+            <label className="font-mono text-[10px] uppercase tracking-widest" style={{ color: C.faint }}>Project access code</label>
+            <div className="relative">
+              <KeyRound size={14} color={C.faint} className="absolute left-3 top-1/2 -translate-y-1/2" />
+              <input autoFocus value={code}
+                onChange={(e) => { setCode(e.target.value); setError(null); }}
+                placeholder="e.g. 4F9K2C"
+                className="w-full rounded-lg pl-9 pr-3 py-2.5 font-mono text-sm tracking-widest uppercase outline-none"
+                style={{ background: C.panel2, color: C.text, border: `1px solid ${C.line}` }} />
+            </div>
+            {error && (
+              <div className="flex items-center gap-1.5 font-body text-xs" style={{ color: C.orange }}>
+                <AlertCircle size={13} /> {error}
+              </div>
+            )}
+            <button type="submit" className="btn-modern w-full py-2.5 rounded-lg font-body text-sm font-medium"
+              style={{ background: C.cyan, color: "#0A0E13" }}>
+              View my project
+            </button>
+            <button type="button" onClick={() => { setMode("choose"); setError(null); }}
+              className="w-full font-mono text-[11px]" style={{ color: C.faint }}>
+              Back
+            </button>
+          </form>
+        )}
+
+        <p className="font-mono text-[10px] text-center mt-6" style={{ color: C.faint }}>
+          Client access codes are issued by your project pilot.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/*  Admin controls — create / edit / delete projects, manage client     */
+/*  access permissions                                                  */
+/* ------------------------------------------------------------------ */
+const TYPE_PRESETS = [
+  "Multifamily construction", "Retail build-out", "Residential listing",
+  "Land / grading", "Industrial / warehouse", "Other",
+];
+
+function FormField({ label, children }) {
+  return (
+    <div>
+      <label className="font-mono text-[10px] uppercase tracking-widest block mb-1.5" style={{ color: C.faint }}>{label}</label>
+      {children}
+    </div>
+  );
+}
+
+const inputStyle = { background: C.panel2, color: C.text, border: `1px solid ${C.line}` };
+
+function ProjectForm({ mode, initial, onCancel, onSave, onDelete }) {
+  const [name, setName] = useState(initial?.name || "");
+  const [client, setClient] = useState(initial?.client || "");
+  const [address, setAddress] = useState(initial?.address || "");
+  const [type, setType] = useState(initial?.type || TYPE_PRESETS[0]);
+  const [iconKey, setIconKey] = useState(initial?.iconKey || "Building2");
+  const [lat, setLat] = useState(initial?.lat ?? "");
+  const [lon, setLon] = useState(initial?.lon ?? "");
+  const [terrainA, setTerrainA] = useState(initial?.terrain?.[0] || "#5c5642");
+  const [terrainB, setTerrainB] = useState(initial?.terrain?.[1] || "#47422f");
+  const [clientAccessEnabled, setClientAccessEnabled] = useState(initial?.clientAccessEnabled ?? true);
+  const [accessCode, setAccessCode] = useState(initial?.accessCode || "");
+  const [copied, setCopied] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+
+  const regenerate = () => setAccessCode(generateAccessCode(initial?.id || name || "project"));
+  const copyCode = async () => {
+    try { await navigator.clipboard.writeText(accessCode); } catch {}
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1400);
+  };
+
+  const submit = (e) => {
+    e.preventDefault();
+    if (!name.trim()) return;
+    onSave({
+      id: initial?.id,
+      name: name.trim(),
+      client: client.trim() || "Unassigned",
+      address: address.trim(),
+      type,
+      iconKey,
+      lat: lat === "" ? 0 : Number(lat),
+      lon: lon === "" ? 0 : Number(lon),
+      terrain: [terrainA, terrainB],
+      clientAccessEnabled,
+      accessCode: accessCode || defaultAccessCode(initial?.id || name),
+    });
+  };
+
+  return (
+    <div className="glass fixed inset-0 z-50 flex items-center justify-center p-5" style={{ background: "rgba(18,24,38,0.45)" }} onClick={onCancel}>
+      <form onSubmit={submit} onClick={(e) => e.stopPropagation()}
+        className="fade-in-up w-full max-w-lg rounded-2xl p-6 max-h-[90vh] overflow-y-auto"
+        style={{ background: C.panel, border: `1px solid ${C.line}`, boxShadow: "0 24px 60px -20px rgba(18,24,38,0.35)" }}>
+        <div className="flex items-center justify-between mb-5">
+          <h3 className="font-display text-lg font-semibold" style={{ color: C.text }}>
+            {mode === "create" ? "New project" : "Edit project"}
+          </h3>
+          <button type="button" onClick={onCancel}><X size={16} color={C.faint} /></button>
+        </div>
+
+        <div className="grid grid-cols-2 gap-4 mb-4">
+          <div className="col-span-2">
+            <FormField label="Project name">
+              <input required value={name} onChange={(e) => setName(e.target.value)}
+                className="w-full rounded-lg px-3 py-2 font-body text-sm outline-none" style={inputStyle} />
+            </FormField>
+          </div>
+          <FormField label="Client">
+            <input value={client} onChange={(e) => setClient(e.target.value)}
+              className="w-full rounded-lg px-3 py-2 font-body text-sm outline-none" style={inputStyle} />
+          </FormField>
+          <FormField label="Project type">
+            <select value={type} onChange={(e) => setType(e.target.value)}
+              className="w-full rounded-lg px-3 py-2 font-body text-sm outline-none" style={inputStyle}>
+              {TYPE_PRESETS.map((t) => <option key={t} value={t}>{t}</option>)}
+            </select>
+          </FormField>
+          <div className="col-span-2">
+            <FormField label="Address">
+              <input value={address} onChange={(e) => setAddress(e.target.value)}
+                className="w-full rounded-lg px-3 py-2 font-body text-sm outline-none" style={inputStyle} />
+            </FormField>
+          </div>
+          <FormField label="Icon">
+            <select value={iconKey} onChange={(e) => setIconKey(e.target.value)}
+              className="w-full rounded-lg px-3 py-2 font-body text-sm outline-none" style={inputStyle}>
+              {ICON_OPTIONS.map((k) => <option key={k} value={k}>{k}</option>)}
+            </select>
+          </FormField>
+          <div className="grid grid-cols-2 gap-2">
+            <FormField label="Terrain A">
+              <input type="color" value={terrainA} onChange={(e) => setTerrainA(e.target.value)}
+                className="w-full h-[38px] rounded-lg cursor-pointer" style={{ border: `1px solid ${C.line}`, background: "none" }} />
+            </FormField>
+            <FormField label="Terrain B">
+              <input type="color" value={terrainB} onChange={(e) => setTerrainB(e.target.value)}
+                className="w-full h-[38px] rounded-lg cursor-pointer" style={{ border: `1px solid ${C.line}`, background: "none" }} />
+            </FormField>
+          </div>
+          <FormField label="Latitude">
+            <input type="number" step="any" value={lat} onChange={(e) => setLat(e.target.value)}
+              className="w-full rounded-lg px-3 py-2 font-body text-sm outline-none" style={inputStyle} />
+          </FormField>
+          <FormField label="Longitude">
+            <input type="number" step="any" value={lon} onChange={(e) => setLon(e.target.value)}
+              className="w-full rounded-lg px-3 py-2 font-body text-sm outline-none" style={inputStyle} />
+          </FormField>
+        </div>
+
+        <div className="rounded-xl p-4 mb-5" style={{ background: C.panel2, border: `1px solid ${C.line}` }}>
+          <div className="flex items-center gap-1.5 mb-3 font-body text-sm font-medium" style={{ color: C.text }}>
+            <ShieldAlert size={14} color={C.orange} /> Access &amp; permissions
+          </div>
+          <label className="flex items-center justify-between mb-3 cursor-pointer">
+            <span className="font-body text-xs" style={{ color: C.muted }}>Allow client access with this project's code</span>
+            <input type="checkbox" checked={clientAccessEnabled} onChange={(e) => setClientAccessEnabled(e.target.checked)}
+              className="w-4 h-4 accent-orange-500" />
+          </label>
+          {mode === "edit" && (
+            <div className="flex items-center gap-2">
+              <div className="flex-1 flex items-center gap-2 rounded-lg px-3 py-2 font-mono text-xs tracking-widest"
+                style={{ background: C.panel, border: `1px solid ${C.line}`, color: C.text }}>
+                <KeyRound size={12} color={C.faint} /> {accessCode}
+              </div>
+              <button type="button" onClick={copyCode} className="btn-modern p-2 rounded-lg" style={{ background: C.panel, border: `1px solid ${C.line}` }}>
+                {copied ? <Check size={14} color={C.ok} /> : <Copy size={14} color={C.cyan} />}
+              </button>
+              <button type="button" onClick={regenerate} className="btn-modern p-2 rounded-lg" style={{ background: C.panel, border: `1px solid ${C.line}` }}>
+                <RefreshCw size={14} color={C.faint} />
+              </button>
+            </div>
+          )}
+          {mode === "create" && (
+            <p className="font-mono text-[10px]" style={{ color: C.faint }}>An access code is generated automatically once the project is created.</p>
+          )}
+        </div>
+
+        <div className="flex items-center justify-between gap-3">
+          {onDelete ? (
+            <button type="button"
+              onClick={() => (confirmDelete ? onDelete() : setConfirmDelete(true))}
+              className="btn-modern flex items-center gap-1.5 px-3 py-2 rounded-lg font-body text-xs font-medium"
+              style={{ background: "rgba(255,93,46,0.1)", color: C.orange }}>
+              <Trash2 size={13} /> {confirmDelete ? "Confirm delete" : "Delete project"}
+            </button>
+          ) : <span />}
+          <div className="flex items-center gap-2">
+            <button type="button" onClick={onCancel} className="font-body text-xs px-3 py-2" style={{ color: C.muted }}>Cancel</button>
+            <button type="submit" className="btn-modern px-4 py-2 rounded-lg font-body text-sm font-medium"
+              style={{ background: C.orange, color: "#160C05", boxShadow: "0 8px 24px -8px rgba(255,93,46,0.45)" }}>
+              {mode === "create" ? "Create project" : "Save changes"}
+            </button>
+          </div>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+function AdminControls({ sites, onCreate, onUpdate, onDelete }) {
+  const [editing, setEditing] = useState(null); // null | "new" | site id
+  const editingSite = editing && editing !== "new" ? sites.find((s) => s.id === editing) : null;
+
+  return (
+    <div>
+      <div className="flex items-start justify-between gap-3 mb-6 flex-wrap">
+        <div>
+          <div className="flex items-center gap-2 mb-1">
+            <Settings size={18} color={C.cyan} />
+            <h1 className="font-display text-2xl font-semibold" style={{ color: C.text }}>Admin controls</h1>
+          </div>
+          <p className="font-body text-sm" style={{ color: C.muted }}>
+            Set up, configure, and edit projects, and manage the access code each client needs to view their site.
+          </p>
+        </div>
+        <button onClick={() => setEditing("new")}
+          className="btn-modern flex items-center gap-1.5 px-3.5 py-2.5 rounded-lg font-body text-sm font-medium shrink-0"
+          style={{ background: C.orange, color: "#160C05", boxShadow: "0 8px 24px -8px rgba(255,93,46,0.45)" }}>
+          <Plus size={15} /> New project
+        </button>
+      </div>
+
+      <div className="space-y-3">
+        {sites.map((s) => {
+          const Icon = s.icon;
+          return (
+            <div key={s.id} className="rounded-xl p-4 flex items-center justify-between gap-3 flex-wrap"
+              style={{ background: C.panel, border: `1px solid ${C.line}` }}>
+              <div className="flex items-center gap-3 min-w-0">
+                <div className="w-9 h-9 rounded-lg flex items-center justify-center shrink-0" style={{ background: C.panel2 }}>
+                  <Icon size={16} color={C.cyan} />
+                </div>
+                <div className="min-w-0">
+                  <div className="font-body text-sm font-medium truncate" style={{ color: C.text }}>{s.name}</div>
+                  <div className="font-mono text-[11px] truncate" style={{ color: C.faint }}>{s.client} · {s.type}</div>
+                </div>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <Badge tone={s.clientAccessEnabled ? "ok" : "muted"}>{s.clientAccessEnabled ? "Client access on" : "Client access off"}</Badge>
+                <span className="font-mono text-[11px] tracking-widest hidden sm:inline" style={{ color: C.faint }}>{s.accessCode}</span>
+                <button onClick={() => setEditing(s.id)} className="btn-modern p-2 rounded-lg" style={{ background: C.panel2, border: `1px solid ${C.line}` }}>
+                  <Pencil size={14} color={C.muted} />
+                </button>
+              </div>
+            </div>
+          );
+        })}
+        {!sites.length && (
+          <div className="rounded-xl p-8 text-center font-body text-sm" style={{ background: C.panel, border: `1px solid ${C.line}`, color: C.muted }}>
+            No projects yet. Create one to get started.
+          </div>
+        )}
+      </div>
+
+      {(editing === "new" || editingSite) && (
+        <ProjectForm
+          mode={editing === "new" ? "create" : "edit"}
+          initial={editingSite}
+          onCancel={() => setEditing(null)}
+          onSave={(data) => { editing === "new" ? onCreate(data) : onUpdate(data); setEditing(null); }}
+          onDelete={editingSite ? () => { onDelete(editingSite.id); setEditing(null); } : null}
+        />
+      )}
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
 /*  Root app                                                            */
 /* ------------------------------------------------------------------ */
 export default function App() {
-  const [sites, setSites] = useState(() =>
-    SITES.map((s) => ({ ...s, _weeks: [1, 2, 3, 4, 5, 6].map((n) => ({ n, date: WEEK_DATES[n - 1], real: false })) }))
-  );
+  const [sites, setSites] = useState(() => loadPersistedSites() ?? buildDefaultSites());
+  const [session, setSession] = useState(() => loadPersistedSession());
   const [view, setView] = useState("dashboard");
   const [activeSiteId, setActiveSiteId] = useState(null);
   const [clientPreview, setClientPreview] = useState(null); // { id, tab }
 
+  useEffect(() => { persistSites(sites); }, [sites]);
+  useEffect(() => { persistSession(session); }, [session]);
+
   const openSite = (id) => { setActiveSiteId(id); setView("site"); };
   const previewClient = (id, tab = "interactive") => setClientPreview({ id, tab });
+  const signOut = () => { setSession({ role: null, siteId: null }); setView("dashboard"); setActiveSiteId(null); setClientPreview(null); };
 
   const handleIngested = (siteId, weekEntry) => {
     setSites((prev) => prev.map((s) => (s.id === siteId ? { ...s, _weeks: [...s._weeks, weekEntry] } : s)));
   };
 
+  const createProject = (data) => {
+    setSites((prev) => [...prev, makeNewProject(data, prev.map((s) => s.id))]);
+  };
+  const updateProject = (data) => {
+    setSites((prev) => prev.map((s) => (s.id === data.id ? { ...s, ...data, icon: resolveIcon(data.iconKey) } : s)));
+  };
+  const deleteProject = (id) => {
+    setSites((prev) => prev.filter((s) => s.id !== id));
+    if (activeSiteId === id) { setActiveSiteId(null); setView("dashboard"); }
+  };
+
   const activeSite = sites.find((s) => s.id === activeSiteId);
+
+  const clientSite = session.role === "client" ? sites.find((s) => s.id === session.siteId) : null;
+  const clientAccessValid = !!(clientSite && clientSite.clientAccessEnabled);
+
+  useEffect(() => {
+    if (session.role === "client" && !clientAccessValid) setSession({ role: null, siteId: null });
+  }, [session.role, clientAccessValid]);
+
+  if (session.role === null || (session.role === "client" && !clientAccessValid)) {
+    return (
+      <AccessGate sites={sites}
+        onAdminLogin={() => setSession({ role: "admin", siteId: null })}
+        onClientAccess={(id) => setSession({ role: "client", siteId: id })} />
+    );
+  }
+
+  if (session.role === "client") {
+    return <ClientPortal site={clientSite} mode="client" onExitPreview={signOut} />;
+  }
 
   if (clientPreview) {
     const previewSite = sites.find((s) => s.id === clientPreview.id);
     return (
-      <ClientPortal site={previewSite} isPreview initialTab={clientPreview.tab}
+      <ClientPortal site={previewSite} mode="preview" initialTab={clientPreview.tab}
         onExitPreview={() => setClientPreview(null)} />
     );
   }
@@ -1358,12 +1888,12 @@ export default function App() {
 
       {/* ambient background glow — signature modern touch, quiet and slow */}
       <div className="ambient-glow pointer-events-none fixed -top-40 -left-32 w-[560px] h-[560px] rounded-full"
-        style={{ background: "radial-gradient(circle, rgba(62,214,196,0.16), transparent 70%)", filter: "blur(10px)", zIndex: 0 }} />
+        style={{ background: "radial-gradient(circle, rgba(11,165,147,0.14), transparent 70%)", filter: "blur(10px)", zIndex: 0 }} />
       <div className="ambient-glow pointer-events-none fixed -bottom-52 -right-40 w-[620px] h-[620px] rounded-full"
-        style={{ background: "radial-gradient(circle, rgba(255,93,46,0.12), transparent 70%)", filter: "blur(10px)", zIndex: 0, animationDelay: "-7s" }} />
+        style={{ background: "radial-gradient(circle, rgba(255,93,46,0.10), transparent 70%)", filter: "blur(10px)", zIndex: 0, animationDelay: "-7s" }} />
 
       <aside className="glass w-56 shrink-0 p-4 flex-col gap-1 hidden md:flex relative z-10"
-        style={{ borderRight: `1px solid ${C.line}`, background: "rgba(17,22,29,0.6)" }}>
+        style={{ borderRight: `1px solid ${C.line}`, background: "rgba(255,255,255,0.72)" }}>
         <div className="flex items-center gap-2 px-2 mb-6">
           <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ background: C.orange, boxShadow: "0 6px 18px -6px rgba(255,93,46,0.5)" }}>
             <Crosshair size={16} color="#160C05" />
@@ -1376,23 +1906,28 @@ export default function App() {
         <NavButton active={view === "dashboard"} icon={Home} label="Dashboard" onClick={() => setView("dashboard")} />
         <NavButton active={view === "ingest"} icon={FolderInput} label="Receiving engine" onClick={() => setView("ingest")} />
         <NavButton active={view === "quick"} icon={ArrowLeftRight} label="Quick compare" onClick={() => setView("quick")} />
+        <NavButton active={view === "admin"} icon={Settings} label="Admin controls" onClick={() => setView("admin")} />
         <div className="mt-6 px-2 font-mono text-[9px] uppercase tracking-widest" style={{ color: C.faint }}>Sites</div>
         {sites.map((s) => (
           <NavButton key={s.id} active={view === "site" && activeSiteId === s.id} icon={s.icon}
             label={s.name.split(" — ")[0].split(" Estates")[0]}
             onClick={() => openSite(s.id)} />
         ))}
-        <div className="mt-auto px-2 pt-4 font-mono text-[9px]" style={{ color: C.faint, borderTop: `1px solid ${C.line}` }}>
-          <div className="pt-3">v0.1 · demo build</div>
+        <div className="mt-auto px-2 pt-4" style={{ borderTop: `1px solid ${C.line}` }}>
+          <button onClick={signOut} className="btn-modern w-full flex items-center gap-2 pt-3 font-mono text-[10px]" style={{ color: C.faint }}>
+            <LogOut size={12} /> Sign out (admin)
+          </button>
         </div>
       </aside>
 
       {/* mobile top nav */}
       <div className="glass md:hidden fixed top-0 left-0 right-0 z-10 flex items-center gap-1 p-2 overflow-x-auto"
-        style={{ background: "rgba(17,22,29,0.75)", borderBottom: `1px solid ${C.line}` }}>
+        style={{ background: "rgba(255,255,255,0.85)", borderBottom: `1px solid ${C.line}` }}>
         <button onClick={() => setView("dashboard")} className="btn-modern p-2 rounded-lg shrink-0" style={{ background: view === "dashboard" ? C.panel2 : "transparent" }}><Home size={16} color={C.text} /></button>
         <button onClick={() => setView("ingest")} className="btn-modern p-2 rounded-lg shrink-0" style={{ background: view === "ingest" ? C.panel2 : "transparent" }}><FolderInput size={16} color={C.text} /></button>
         <button onClick={() => setView("quick")} className="btn-modern p-2 rounded-lg shrink-0" style={{ background: view === "quick" ? C.panel2 : "transparent" }}><ArrowLeftRight size={16} color={C.text} /></button>
+        <button onClick={() => setView("admin")} className="btn-modern p-2 rounded-lg shrink-0" style={{ background: view === "admin" ? C.panel2 : "transparent" }}><Settings size={16} color={C.text} /></button>
+        <button onClick={signOut} className="btn-modern p-2 rounded-lg shrink-0 ml-auto"><LogOut size={16} color={C.faint} /></button>
       </div>
 
       <main className="flex-1 p-5 md:p-8 pt-16 md:pt-8 max-w-4xl relative z-10">
@@ -1402,6 +1937,9 @@ export default function App() {
         )}
         {view === "ingest" && <ReceivingEngine sites={sites} onIngested={handleIngested} onOpenSite={openSite} />}
         {view === "quick" && <QuickCompare />}
+        {view === "admin" && (
+          <AdminControls sites={sites} onCreate={createProject} onUpdate={updateProject} onDelete={deleteProject} />
+        )}
       </main>
     </div>
   );
