@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback } from "react";
 import {
   Plane, Radar, Layers, SlidersHorizontal, Columns, Upload, CheckCircle2,
-  Circle, ChevronRight, MapPin, Calendar, TrendingUp, Crosshair,
+  Circle, ChevronRight, MapPin, Calendar, TrendingUp,
   ArrowLeftRight, Building2, X, Loader2, ImagePlus, ArrowLeft, Home,
   Share2, Copy, Check, ShieldCheck, LogOut, Satellite, FolderInput,
   Images, Compass, Clock, ChevronDown, Download, FileText,
@@ -13,17 +13,19 @@ import {
 /*  Tokens                                                              */
 /* ------------------------------------------------------------------ */
 const C = {
-  bg: "#F4F7FB",
+  bg: "#F3F8FE",
   panel: "#FFFFFF",
-  panel2: "#EEF3F8",
-  line: "#DEE6EF",
-  cyan: "#0BA593",
-  cyanDim: "#8FDCD0",
+  panel2: "#EDF4FC",
+  line: "#DCE7F5",
+  cyan: "#1C64D6",
+  cyanDim: "#BBD6F7",
+  skySoft: "#7EC1FA",
   orange: "#FF5D2E",
   text: "#121826",
   muted: "#5B6672",
   faint: "#8B96A3",
   ok: "#1C9A5B",
+  onAccent: "#FFFFFF",
 };
 
 /* ------------------------------------------------------------------ */
@@ -64,8 +66,8 @@ const FONTS = `
 }
 .card-lift:hover {
   transform: translateY(-4px);
-  box-shadow: 0 18px 36px -18px rgba(18,24,38,0.18), 0 0 0 1px rgba(11,165,147,0.18);
-  border-color: rgba(11,165,147,0.3) !important;
+  box-shadow: 0 18px 36px -18px rgba(18,24,38,0.18), 0 0 0 1px rgba(28,100,214,0.18);
+  border-color: rgba(28,100,214,0.3) !important;
 }
 .btn-modern {
   transition: transform 0.2s cubic-bezier(0.16,1,0.3,1), filter 0.2s ease, box-shadow 0.2s ease;
@@ -89,7 +91,7 @@ const FONTS = `
   position: absolute;
   left: 0; bottom: 0;
   height: 2px; width: 100%;
-  background: linear-gradient(90deg, #FF5D2E, #0BA593);
+  background: linear-gradient(90deg, #7EC1FA, #1C64D6);
   transform: scaleX(0);
   transform-origin: left;
   transition: transform 0.3s cubic-bezier(0.16,1,0.3,1);
@@ -130,83 +132,9 @@ function mulberry32(seed) {
 }
 
 /* ------------------------------------------------------------------ */
-/*  Site data — buildings carry a stage timeline so week-over-week      */
-/*  scenes are deterministic and the diff signal is meaningful          */
+/*  Site data — projects are created from scratch via Admin controls;   */
+/*  there is no seeded demo data                                       */
 /* ------------------------------------------------------------------ */
-const WEEK_DATES = ["Jul 13", "Jul 20", "Jul 27", "Aug 3", "Aug 10", "Aug 17"];
-
-const SITES = [
-  {
-    id: "foundry-row",
-    name: "Foundry Row — Phase 2",
-    address: "1180 Kestrel Way, Marrow County",
-    client: "Kestrel Development Group",
-    type: "Multifamily construction",
-    lat: 39.7684, lon: -86.1581,
-    iconKey: "Building2",
-    terrain: ["#4b4536", "#3c3728"],
-    bounds: { x: 40, y: 40, w: 400, h: 220 },
-    roads: [{ x1: 0, y1: 250, x2: 480, y2: 250, w: 26 }],
-    buildings: [
-      { x: 70, y: 70, w: 90, h: 60, stages: [{ w: 1, c: "#8a7256" }, { w: 2, c: "#9aa3ab" }, { w: 3, c: "#caa06b" }, { w: 5, c: "#e3ddd0" }] },
-      { x: 180, y: 70, w: 90, h: 60, stages: [{ w: 1, c: "#8a7256" }, { w: 2, c: "#9aa3ab" }, { w: 4, c: "#caa06b" }] },
-      { x: 290, y: 70, w: 90, h: 60, stages: [{ w: 2, c: "#8a7256" }, { w: 3, c: "#9aa3ab" }] },
-      { x: 70, y: 150, w: 200, h: 40, stages: [{ w: 4, c: "#8a7256" }, { w: 5, c: "#9aa3ab" }, { w: 6, c: "#caa06b" }] },
-    ],
-  },
-  {
-    id: "riverstone",
-    name: "Riverstone Commercial Plaza",
-    address: "402 Halden Ave, Riverstone",
-    client: "Halden Retail Partners",
-    type: "Retail build-out",
-    lat: 39.8012, lon: -86.1102,
-    iconKey: "Building2",
-    terrain: ["#5a5648", "#454135"],
-    bounds: { x: 30, y: 30, w: 420, h: 240 },
-    roads: [{ x1: 0, y1: 60, x2: 480, y2: 60, w: 22 }, { x1: 250, y1: 0, x2: 250, y2: 300, w: 18 }],
-    buildings: [
-      { x: 60, y: 100, w: 150, h: 110, stages: [{ w: 1, c: "#8a7256" }, { w: 2, c: "#9aa3ab" }, { w: 4, c: "#caa06b" }, { w: 6, c: "#e3ddd0" }] },
-      { x: 300, y: 100, w: 130, h: 90, stages: [{ w: 3, c: "#8a7256" }, { w: 4, c: "#9aa3ab" }, { w: 5, c: "#caa06b" }] },
-      { x: 300, y: 200, w: 130, h: 50, stages: [{ w: 5, c: "#8a7256" }] },
-    ],
-  },
-  {
-    id: "maple-ridge",
-    name: "Maple Ridge Estates — Lot 14",
-    address: "14 Songbird Ct, Maple Ridge",
-    client: "Maple Ridge Realty",
-    type: "Residential listing",
-    lat: 39.8467, lon: -86.2201,
-    iconKey: "Home",
-    terrain: ["#4a5636", "#3a4429"],
-    bounds: { x: 60, y: 60, w: 360, h: 190 },
-    roads: [{ x1: 0, y1: 40, x2: 480, y2: 40, w: 20 }],
-    buildings: [
-      { x: 160, y: 100, w: 160, h: 100, stages: [{ w: 1, c: "#caa06b" }, { w: 3, c: "#e3ddd0" }] },
-      { x: 100, y: 210, w: 60, h: 30, stages: [{ w: 4, c: "#9aa3ab" }] },
-      { x: 330, y: 90, w: 45, h: 45, stages: [{ w: 5, c: "#9aa3ab" }] },
-    ],
-  },
-  {
-    id: "overlook",
-    name: "Overlook Business Park — Parcel C",
-    address: "9 Ridgeline Dr, Overlook",
-    client: "Overlook Land Holdings",
-    type: "Land / grading",
-    lat: 39.7211, lon: -86.0893,
-    iconKey: "MapPin",
-    terrain: ["#6b6144", "#554d36"],
-    bounds: { x: 30, y: 30, w: 420, h: 240 },
-    roads: [{ x1: 0, y1: 270, x2: 480, y2: 270, w: 24 }],
-    buildings: [
-      { x: 80, y: 80, w: 320, h: 30, stages: [{ w: 2, c: "#8a7256" }] },
-      { x: 80, y: 130, w: 150, h: 20, stages: [{ w: 4, c: "#8a7256" }] },
-      { x: 260, y: 130, w: 140, h: 20, stages: [{ w: 5, c: "#8a7256" }] },
-    ],
-  },
-];
-
 const W = 480, H = 300;
 
 /* ------------------------------------------------------------------ */
@@ -216,18 +144,6 @@ const W = 480, H = 300;
 /* ------------------------------------------------------------------ */
 const STORAGE_KEY_SITES = "wisconsin-aerial:sites";
 const STORAGE_KEY_SESSION = "wisconsin-aerial:session";
-
-function buildDefaultScene() {
-  return {
-    terrain: ["#5c5642", "#47422f"],
-    bounds: { x: 40, y: 40, w: 400, h: 220 },
-    roads: [{ x1: 0, y1: 260, x2: 480, y2: 260, w: 22 }],
-    buildings: [
-      { x: 90, y: 90, w: 140, h: 90, stages: [{ w: 2, c: "#8a7256" }, { w: 3, c: "#9aa3ab" }, { w: 5, c: "#caa06b" }] },
-      { x: 260, y: 110, w: 110, h: 70, stages: [{ w: 4, c: "#8a7256" }] },
-    ],
-  };
-}
 
 function defaultAccessCode(seed) {
   return Math.abs(hashStr(seed + "-access")).toString(36).slice(0, 6).toUpperCase();
@@ -247,6 +163,10 @@ function uniqueId(base, existingIds) {
   return id;
 }
 
+function formatShortDate(date = new Date()) {
+  return date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+}
+
 function hydrateSite(raw) {
   return { ...raw, icon: resolveIcon(raw.iconKey) };
 }
@@ -254,16 +174,6 @@ function hydrateSite(raw) {
 function serializeSite(site) {
   const { icon, ...rest } = site;
   return rest;
-}
-
-function buildDefaultSites() {
-  return SITES.map((s) => ({
-    ...s,
-    icon: resolveIcon(s.iconKey),
-    accessCode: defaultAccessCode(s.id),
-    clientAccessEnabled: true,
-    _weeks: [1, 2, 3, 4, 5, 6].map((n) => ({ n, date: WEEK_DATES[n - 1], real: false })),
-  }));
 }
 
 function loadPersistedSites() {
@@ -300,7 +210,7 @@ function persistSession(session) {
   } catch {}
 }
 
-function makeNewProject({ name, address, client, type, iconKey, lat, lon, terrain }, existingIds) {
+function makeNewProject({ name, address, client, type, iconKey, lat, lon }, existingIds) {
   const id = uniqueId(slugify(name), existingIds);
   return {
     id,
@@ -314,103 +224,8 @@ function makeNewProject({ name, address, client, type, iconKey, lat, lon, terrai
     icon: resolveIcon(iconKey),
     accessCode: defaultAccessCode(id),
     clientAccessEnabled: true,
-    _weeks: [1, 2, 3, 4, 5, 6].map((n) => ({ n, date: WEEK_DATES[n - 1], real: false })),
-    ...buildDefaultScene(),
-    terrain,
+    _weeks: [],
   };
-}
-
-/* ------------------------------------------------------------------ */
-/*  Procedural scene renderer                                           */
-/* ------------------------------------------------------------------ */
-function stageColorAt(building, week) {
-  let c = null;
-  for (const s of building.stages) if (s.w <= week) c = s.c;
-  return c;
-}
-
-function drawScene(ctx, site, week) {
-  ctx.clearRect(0, 0, W, H);
-  const rngSite = mulberry32(hashStr(site.id));
-  const rngWeek = mulberry32(hashStr(site.id + "-" + week));
-
-  // terrain
-  const grad = ctx.createLinearGradient(0, 0, W, H);
-  grad.addColorStop(0, site.terrain[0]);
-  grad.addColorStop(1, site.terrain[1]);
-  ctx.fillStyle = grad;
-  ctx.fillRect(0, 0, W, H);
-
-  // ground speckle texture (seeded by site only — stable across weeks)
-  for (let i = 0; i < 220; i++) {
-    const x = rngSite() * W, y = rngSite() * H, r = 0.6 + rngSite() * 1.4;
-    ctx.fillStyle = `rgba(0,0,0,${0.05 + rngSite() * 0.08})`;
-    ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
-  }
-
-  // roads
-  ctx.strokeStyle = "#2b2a27";
-  site.roads.forEach((r) => {
-    ctx.lineWidth = r.w;
-    ctx.beginPath(); ctx.moveTo(r.x1, r.y1); ctx.lineTo(r.x2, r.y2); ctx.stroke();
-    ctx.strokeStyle = "#c9c2a8"; ctx.lineWidth = 1.2; ctx.setLineDash([8, 8]);
-    ctx.beginPath(); ctx.moveTo(r.x1, r.y1); ctx.lineTo(r.x2, r.y2); ctx.stroke();
-    ctx.setLineDash([]); ctx.strokeStyle = "#2b2a27";
-  });
-
-  // parcel boundary
-  ctx.strokeStyle = "rgba(255,255,255,0.35)";
-  ctx.lineWidth = 1.5; ctx.setLineDash([6, 5]);
-  ctx.strokeRect(site.bounds.x, site.bounds.y, site.bounds.w, site.bounds.h);
-  ctx.setLineDash([]);
-
-  // buildings by stage
-  site.buildings.forEach((b) => {
-    const col = stageColorAt(b, week);
-    if (!col) return;
-    ctx.fillStyle = "rgba(0,0,0,0.25)";
-    ctx.fillRect(b.x + 4, b.y + 4, b.w, b.h);
-    ctx.fillStyle = col;
-    ctx.fillRect(b.x, b.y, b.w, b.h);
-    const finalStage = b.stages[b.stages.length - 1];
-    if (finalStage.w <= week && (col === "#e3ddd0")) {
-      ctx.strokeStyle = "rgba(0,0,0,0.3)"; ctx.lineWidth = 1;
-      ctx.beginPath(); ctx.moveTo(b.x, b.y + b.h / 2); ctx.lineTo(b.x + b.w, b.y + b.h / 2); ctx.stroke();
-      ctx.fillStyle = "rgba(60,110,140,0.55)";
-      for (let wx = b.x + 8; wx < b.x + b.w - 8; wx += 18) ctx.fillRect(wx, b.y + 8, 8, 8);
-    }
-  });
-
-  // equipment (vehicles) — position changes week to week
-  const eqCount = 2 + Math.floor(rngWeek() * 3);
-  for (let i = 0; i < eqCount; i++) {
-    const x = site.bounds.x + rngWeek() * site.bounds.w;
-    const y = site.bounds.y + rngWeek() * site.bounds.h;
-    ctx.fillStyle = C.orange;
-    ctx.fillRect(x, y, 10, 6);
-    ctx.fillStyle = "#1a1a1a";
-    ctx.fillRect(x + 1, y + 6, 3, 2); ctx.fillRect(x + 6, y + 6, 3, 2);
-  }
-
-  // north arrow + scale bar (signature reticle motif)
-  ctx.save();
-  ctx.translate(W - 34, 34);
-  ctx.strokeStyle = "rgba(255,255,255,0.8)"; ctx.fillStyle = "rgba(255,255,255,0.8)";
-  ctx.beginPath(); ctx.arc(0, 0, 16, 0, Math.PI * 2); ctx.stroke();
-  ctx.beginPath(); ctx.moveTo(0, -16); ctx.lineTo(0, 16); ctx.moveTo(-16, 0); ctx.lineTo(16, 0); ctx.stroke();
-  ctx.beginPath(); ctx.moveTo(0, -16); ctx.lineTo(-4, -6); ctx.lineTo(4, -6); ctx.closePath(); ctx.fill();
-  ctx.restore();
-  ctx.fillStyle = "rgba(255,255,255,0.7)";
-  ctx.fillRect(16, H - 20, 40, 3);
-  ctx.font = "9px monospace";
-  ctx.fillText("50 M", 16, H - 24);
-}
-
-function canvasFor(site, week) {
-  const c = document.createElement("canvas");
-  c.width = W; c.height = H;
-  drawScene(c.getContext("2d"), site, week);
-  return c;
 }
 
 function loadImageToCanvas(dataUrl) {
@@ -429,9 +244,8 @@ function loadImageToCanvas(dataUrl) {
   });
 }
 
-async function sceneCanvas(site, weekEntry) {
-  if (weekEntry.real) return loadImageToCanvas(weekEntry.dataUrl);
-  return canvasFor(site, weekEntry.n);
+function sceneCanvas(weekEntry) {
+  return loadImageToCanvas(weekEntry.dataUrl);
 }
 
 function diffCanvases(canvasA, canvasB) {
@@ -457,16 +271,29 @@ function diffCanvases(canvasA, canvasB) {
 /* ------------------------------------------------------------------ */
 /*  Small UI atoms                                                      */
 /* ------------------------------------------------------------------ */
+function Logo({ size = 36 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 64 64" role="img" aria-label="Wisconsin Aerial" className="shrink-0">
+      <circle cx="32" cy="32" r="30" fill="#FFFFFF" stroke={C.line} strokeWidth="2" />
+      <circle cx="32" cy="32" r="30" fill="none" stroke={C.cyan} strokeWidth="1.5" opacity="0.4" />
+      <text x="32" y="28" textAnchor="middle" fontFamily="'Bricolage Grotesque', system-ui, sans-serif"
+        fontWeight="700" fontSize="8.5" letterSpacing="0.5" fill={C.text}>WISCONSIN</text>
+      <text x="32" y="42" textAnchor="middle" fontFamily="'Bricolage Grotesque', system-ui, sans-serif"
+        fontWeight="800" fontSize="13" letterSpacing="0.5" fill={C.cyan}>AERIAL</text>
+    </svg>
+  );
+}
+
 function Badge({ children, tone = "muted" }) {
   const map = {
     muted: { bg: "rgba(91,102,114,0.09)", fg: C.muted },
-    cyan: { bg: "rgba(11,165,147,0.12)", fg: C.cyan },
+    cyan: { bg: "rgba(28,100,214,0.12)", fg: C.cyan },
     orange: { bg: "rgba(255,93,46,0.12)", fg: C.orange },
     ok: { bg: "rgba(28,154,91,0.12)", fg: C.ok },
     // Dark, theme-independent variants for badges placed on top of the
     // aerial photo canvases, which stay dark/earthy regardless of app theme.
     overlayMuted: { bg: "rgba(10,14,20,0.55)", fg: "#E7ECF2" },
-    overlayCyan: { bg: "rgba(10,14,20,0.55)", fg: "#5EEAD4" },
+    overlayCyan: { bg: "rgba(10,14,20,0.55)", fg: "#8FC1FA" },
     overlayOrange: { bg: "rgba(10,14,20,0.55)", fg: "#FF9166" },
   }[tone];
   return (
@@ -484,7 +311,7 @@ function NavButton({ active, icon: Icon, label, onClick }) {
       style={{
         background: active ? C.panel2 : "transparent",
         color: active ? C.text : C.muted,
-        borderLeft: active ? `2px solid ${C.orange}` : "2px solid transparent",
+        borderLeft: active ? `2px solid ${C.cyan}` : "2px solid transparent",
       }}>
       <Icon size={16} strokeWidth={2} />
       {label}
@@ -511,12 +338,12 @@ function FlightLogStrip({ weeks, selected, onToggle }) {
             <React.Fragment key={w.n}>
               {i > 0 && <div className="h-px w-6 shrink-0" style={{ background: C.line }} />}
               <button onClick={() => onToggle(w.n)} className="flex flex-col items-center gap-1.5 shrink-0 px-2 group">
-                <div className="w-px h-3" style={{ background: isSel ? C.orange : C.faint }} />
+                <div className="w-px h-3" style={{ background: isSel ? C.cyan : C.faint }} />
                 <div className="w-3 h-3 rounded-full transition-all"
                   style={{
-                    background: isSel ? C.orange : C.panel2,
-                    border: `2px solid ${isSel ? C.orange : C.line}`,
-                    boxShadow: isSel ? `0 0 0 3px rgba(255,93,46,0.18)` : "none",
+                    background: isSel ? C.cyan : C.panel2,
+                    border: `2px solid ${isSel ? C.cyan : C.line}`,
+                    boxShadow: isSel ? `0 0 0 3px rgba(28,100,214,0.18)` : "none",
                   }} />
                 <div className="font-mono text-[10px]" style={{ color: isSel ? C.text : C.faint }}>W{w.n}</div>
                 <div className="font-mono text-[9px]" style={{ color: isSel ? C.muted : C.faint }}>{w.date}</div>
@@ -571,10 +398,10 @@ function SliderCompare({ before, after, labelBefore, labelAfter }) {
         <div className="absolute inset-0 overflow-hidden" style={{ clipPath: `inset(0 ${100 - pct}% 0 0)` }}>
           <img src={before} alt="before" className="absolute inset-0 w-full h-full object-cover" draggable={false} />
         </div>
-        <div className="absolute top-0 bottom-0 w-0.5" style={{ left: `${pct}%`, background: C.orange }}>
+        <div className="absolute top-0 bottom-0 w-0.5" style={{ left: `${pct}%`, background: C.cyan }}>
           <div className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-7 h-7 rounded-full flex items-center justify-center"
-            style={{ background: C.orange, boxShadow: "0 4px 14px rgba(255,93,46,0.4)" }}>
-            <ArrowLeftRight size={14} color="#0A0E13" />
+            style={{ background: C.cyan, boxShadow: "0 4px 14px rgba(28,100,214,0.4)" }}>
+            <ArrowLeftRight size={14} color={C.onAccent} />
           </div>
         </div>
         <div className="absolute top-2 left-2"><Badge tone="overlayMuted">{labelBefore}</Badge></div>
@@ -599,7 +426,7 @@ function CompareWorkspace({ site, weekA, weekB }) {
     let cancelled = false;
     setLoading(true);
     (async () => {
-      const [ca, cb] = await Promise.all([sceneCanvas(site, weekA), sceneCanvas(site, weekB)]);
+      const [ca, cb] = await Promise.all([sceneCanvas(weekA), sceneCanvas(weekB)]);
       if (cancelled) return;
       setImgA(ca.toDataURL());
       setImgB(cb.toDataURL());
@@ -633,8 +460,8 @@ function CompareWorkspace({ site, weekA, weekB }) {
             <button key={t.id} onClick={() => setMode(t.id)}
               className="btn-modern flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-body"
               style={{
-                background: mode === t.id ? C.orange : C.panel2,
-                color: mode === t.id ? "#160C05" : C.muted,
+                background: mode === t.id ? C.cyan : C.panel2,
+                color: mode === t.id ? C.onAccent : C.muted,
                 fontWeight: mode === t.id ? 600 : 400,
               }}>
               <t.icon size={13} /> {t.label}
@@ -675,7 +502,7 @@ function CompareWorkspace({ site, weekA, weekB }) {
           <div className="flex items-center gap-3 mt-3">
             <span className="font-mono text-[10px]" style={{ color: C.faint }}>OVERLAY</span>
             <input type="range" min="0" max="100" value={opacity}
-              onChange={(e) => setOpacity(+e.target.value)} className="flex-1 accent-orange-500" />
+              onChange={(e) => setOpacity(+e.target.value)} className="flex-1 accent-blue-600" />
             <span className="font-mono text-[10px] w-8 text-right" style={{ color: C.muted }}>{opacity}%</span>
           </div>
         </div>
@@ -691,24 +518,37 @@ function SiteCard({ site, onOpen, index = 0 }) {
   const [thumb, setThumb] = useState(null);
   const [pct, setPct] = useState(null);
   const weeks = site._weeks;
+  const last = weeks[weeks.length - 1];
+  const prev = weeks[weeks.length - 2];
+
   useEffect(() => {
-    const last = weeks[weeks.length - 1], prev = weeks[weeks.length - 2];
+    if (!last) return;
+    setThumb(null);
+    setPct(null);
     (async () => {
-      const [ca, cb] = await Promise.all([sceneCanvas(site, prev), sceneCanvas(site, last)]);
+      const cb = await sceneCanvas(last);
       setThumb(cb.toDataURL());
-      setPct(diffCanvases(ca, cb).percent);
+      if (prev) {
+        const ca = await sceneCanvas(prev);
+        setPct(diffCanvases(ca, cb).percent);
+      }
     })();
   }, [site]);
+
   const Icon = site.icon;
-  const last = weeks[weeks.length - 1];
   return (
     <button onClick={() => onOpen(site.id)}
       className="card-lift fade-in-up text-left rounded-2xl overflow-hidden"
       style={{ background: C.panel, border: `1px solid ${C.line}`, animationDelay: `${index * 70}ms` }}>
       <div className="relative" style={{ aspectRatio: `${W}/${H}`, background: C.panel2 }}>
-        {thumb ? <img src={thumb} className="w-full h-full object-cover" /> :
+        {!last ? (
+          <div className="w-full h-full flex flex-col items-center justify-center gap-1.5">
+            <Satellite size={18} color={C.faint} />
+            <span className="font-mono text-[10px]" style={{ color: C.faint }}>No captures yet</span>
+          </div>
+        ) : thumb ? <img src={thumb} className="w-full h-full object-cover" /> :
           <div className="w-full h-full flex items-center justify-center"><Loader2 size={16} className="animate-spin" color={C.faint} /></div>}
-        <div className="absolute top-2 left-2"><Badge tone="overlayCyan">W{last.n} · {last.date}</Badge></div>
+        {last && <div className="absolute top-2 left-2"><Badge tone="overlayCyan">W{last.n} · {last.date}</Badge></div>}
         {pct !== null && (
           <div className="absolute top-2 right-2"><Badge tone={pct > 4 ? "overlayOrange" : "overlayMuted"}>{pct.toFixed(1)}% Δ this week</Badge></div>
         )}
@@ -728,18 +568,43 @@ function SiteCard({ site, onOpen, index = 0 }) {
   );
 }
 
-function Dashboard({ sites, onOpen }) {
+function Dashboard({ sites, onOpen, onGoToAdmin }) {
   return (
     <div>
-      <div className="mb-6">
-        <h1 className="font-display text-2xl font-semibold" style={{ color: C.text }}>Active sites</h1>
-        <p className="font-body text-sm mt-1" style={{ color: C.muted }}>
-          {sites.length} sites under aerial survey · flown on a weekly cadence
-        </p>
+      <div className="rounded-2xl overflow-hidden mb-6" style={{ border: `1px solid ${C.line}` }}>
+        <div className="flex items-center gap-4 px-6 py-8 md:px-10 md:py-10"
+          style={{ background: "linear-gradient(135deg, #CFE7FC 0%, #EAF4FD 55%, #FFFFFF 100%)" }}>
+          <Logo size={54} />
+          <div>
+            <h1 className="font-display text-xl md:text-2xl font-extrabold tracking-tight" style={{ color: "#0B1E3D" }}>
+              WISCONSIN AERIAL IMAGERY
+            </h1>
+            <p className="font-body text-sm mt-1" style={{ color: C.muted }}>
+              {sites.length ? `${sites.length} ${sites.length === 1 ? "site" : "sites"} under aerial survey` : "Weekly drone survey, progress tracking, and client reporting."}
+            </p>
+          </div>
+        </div>
+        <div style={{ height: 4, background: "linear-gradient(90deg, #7EC1FA, #1C64D6)" }} />
       </div>
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        {sites.map((s, i) => <SiteCard key={s.id} site={s} onOpen={onOpen} index={i} />)}
-      </div>
+
+      {sites.length === 0 ? (
+        <div className="rounded-2xl p-10 text-center flex flex-col items-center gap-3"
+          style={{ background: C.panel, border: `1px dashed ${C.line}` }}>
+          <Plane size={22} color={C.cyan} />
+          <h2 className="font-display text-lg font-semibold" style={{ color: C.text }}>No projects yet</h2>
+          <p className="font-body text-sm max-w-sm" style={{ color: C.muted }}>
+            Set up your first project in Admin controls, then send flight imagery for it through the Receiving engine.
+          </p>
+          <button onClick={onGoToAdmin} className="btn-modern mt-2 flex items-center gap-1.5 px-4 py-2.5 rounded-lg font-body text-sm font-medium"
+            style={{ background: C.cyan, color: C.onAccent, boxShadow: "0 8px 24px -8px rgba(28,100,214,0.4)" }}>
+            <Plus size={15} /> New project
+          </button>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          {sites.map((s, i) => <SiteCard key={s.id} site={s} onOpen={onOpen} index={i} />)}
+        </div>
+      )}
     </div>
   );
 }
@@ -762,7 +627,7 @@ function ShareModal({ site, onClose, onPreview }) {
         style={{ background: C.panel, border: `1px solid ${C.line}`, boxShadow: "0 24px 60px -20px rgba(18,24,38,0.35)" }}>
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-2">
-            <Share2 size={16} color={C.orange} />
+            <Share2 size={16} color={C.cyan} />
             <h3 className="font-display text-lg font-semibold" style={{ color: C.text }}>Share with client</h3>
           </div>
           <button onClick={onClose}><X size={16} color={C.faint} /></button>
@@ -786,7 +651,7 @@ function ShareModal({ site, onClose, onPreview }) {
           </div>
         )}
         <button onClick={onPreview} className="btn-modern w-full py-2.5 rounded-lg font-body text-sm font-medium flex items-center justify-center gap-2"
-          style={{ background: C.orange, color: "#160C05", boxShadow: "0 8px 24px -8px rgba(255,93,46,0.45)" }}>
+          style={{ background: C.cyan, color: C.onAccent, boxShadow: "0 8px 24px -8px rgba(28,100,214,0.4)" }}>
           <Compass size={14} /> Preview what your client sees
         </button>
       </div>
@@ -794,9 +659,11 @@ function ShareModal({ site, onClose, onPreview }) {
   );
 }
 
-function SiteDetail({ site, onBack, onPreviewClient }) {
+function SiteDetail({ site, onBack, onPreviewClient, onGoToIngest }) {
   const weeks = site._weeks;
-  const [selected, setSelected] = useState([weeks[weeks.length - 2].n, weeks[weeks.length - 1].n]);
+  const [selected, setSelected] = useState(() =>
+    weeks.length >= 2 ? [weeks[weeks.length - 2].n, weeks[weeks.length - 1].n] : weeks.length === 1 ? [weeks[0].n] : []
+  );
   const [showShare, setShowShare] = useState(false);
 
   const toggle = (n) => {
@@ -839,16 +706,31 @@ function SiteDetail({ site, onBack, onPreviewClient }) {
         <MapPin size={12} /> {site.address}
       </div>
 
-      <div className="mb-4">
-        <FlightLogStrip weeks={weeks} selected={selected} onToggle={toggle} />
-      </div>
-
-      {selected.length < 2 ? (
-        <div className="rounded-xl p-8 text-center font-body text-sm" style={{ background: C.panel, border: `1px solid ${C.line}`, color: C.muted }}>
-          Select one more capture on the flight log to build a comparison.
+      {weeks.length === 0 ? (
+        <div className="rounded-xl p-8 text-center font-body text-sm flex flex-col items-center gap-3" style={{ background: C.panel, border: `1px solid ${C.line}`, color: C.muted }}>
+          <Satellite size={20} color={C.faint} />
+          <span>No flights logged yet for this project.</span>
+          <button onClick={onGoToIngest}
+            className="btn-modern flex items-center gap-1.5 px-3.5 py-2 rounded-lg font-body text-xs font-medium"
+            style={{ background: C.cyan, color: "#FFFFFF" }}>
+            <FolderInput size={13} /> Add the first capture
+          </button>
         </div>
       ) : (
-        <CompareWorkspace site={site} weekA={weekA} weekB={weekB} />
+        <>
+          <div className="mb-4">
+            <FlightLogStrip weeks={weeks} selected={selected} onToggle={toggle} />
+          </div>
+          {selected.length < 2 ? (
+            <div className="rounded-xl p-8 text-center font-body text-sm" style={{ background: C.panel, border: `1px solid ${C.line}`, color: C.muted }}>
+              {weeks.length === 1
+                ? "One capture logged so far. Add another flight to unlock comparisons."
+                : "Select one more capture on the flight log to build a comparison."}
+            </div>
+          ) : (
+            <CompareWorkspace site={site} weekA={weekA} weekB={weekB} />
+          )}
+        </>
       )}
 
       {showShare && (
@@ -887,7 +769,7 @@ function buildReceivedFile(file, index, seedBase) {
   };
 }
 
-function ReceivingEngine({ sites, onIngested, onOpenSite }) {
+function ReceivingEngine({ sites, onIngested, onOpenSite, onGoToAdmin }) {
   const [received, setReceived] = useState([]); // {id,file,name,dataUrl,alt,dLat,dLon,t}
   const [dragOver, setDragOver] = useState(false);
   const [detectedId, setDetectedId] = useState(null);
@@ -899,6 +781,7 @@ function ReceivingEngine({ sites, onIngested, onOpenSite }) {
   const site = sites.find((s) => s.id === (siteId || detectedId));
 
   const handleFiles = (fileList) => {
+    if (!sites.length) return;
     const files = Array.from(fileList).filter((f) => f.type.startsWith("image/"));
     if (!files.length) return;
     const seedBase = "batch-" + Date.now();
@@ -939,8 +822,8 @@ function ReceivingEngine({ sites, onIngested, onOpenSite }) {
 
   const finish = () => {
     const weeks = site._weeks;
-    const nextN = weeks[weeks.length - 1].n + 1;
-    onIngested(site.id, { n: nextN, date: "New", real: true, dataUrl: hero.dataUrl, sourceCount: received.length });
+    const nextN = weeks.length ? weeks[weeks.length - 1].n + 1 : 1;
+    onIngested(site.id, { n: nextN, date: formatShortDate(), real: true, dataUrl: hero.dataUrl, sourceCount: received.length });
     onOpenSite(site.id);
   };
 
@@ -957,12 +840,25 @@ function ReceivingEngine({ sites, onIngested, onOpenSite }) {
         </p>
       </div>
 
-      {received.length === 0 && (
+      {sites.length === 0 ? (
+        <div className="rounded-xl p-10 flex flex-col items-center justify-center text-center gap-3"
+          style={{ background: C.panel, border: `1px dashed ${C.line}` }}>
+          <Settings size={22} color={C.faint} />
+          <div className="font-body text-sm" style={{ color: C.text }}>No projects set up yet</div>
+          <div className="font-mono text-[11px] max-w-xs" style={{ color: C.faint }}>
+            Create a project in Admin controls before receiving flight imagery for it.
+          </div>
+          <button onClick={onGoToAdmin} className="btn-modern mt-2 px-4 py-2 rounded-lg font-body text-xs font-medium"
+            style={{ background: C.cyan, color: "#FFFFFF" }}>
+            Go to Admin controls
+          </button>
+        </div>
+      ) : received.length === 0 && (
         <div onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
           onDragLeave={() => setDragOver(false)}
           onDrop={(e) => { e.preventDefault(); setDragOver(false); handleFiles(e.dataTransfer.files); }}
           className="rounded-xl p-10 flex flex-col items-center justify-center text-center gap-3 transition-colors"
-          style={{ background: C.panel, border: `2px dashed ${dragOver ? C.orange : C.line}` }}>
+          style={{ background: C.panel, border: `2px dashed ${dragOver ? C.cyan : C.line}` }}>
           <div className="w-14 h-14 rounded-full flex items-center justify-center" style={{ background: C.panel2 }}>
             <Plane size={22} color={C.cyan} />
           </div>
@@ -1024,7 +920,7 @@ function ReceivingEngine({ sites, onIngested, onOpenSite }) {
                 {sites.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
               </select>
               <button onClick={begin} className="btn-modern w-full mt-4 py-3 rounded-lg font-body text-sm font-medium flex items-center justify-center gap-2"
-                style={{ background: C.orange, color: "#160C05", boxShadow: "0 8px 24px -8px rgba(255,93,46,0.45)" }}>
+                style={{ background: C.cyan, color: C.onAccent, boxShadow: "0 8px 24px -8px rgba(28,100,214,0.4)" }}>
                 <Upload size={15} /> Process batch
               </button>
             </div>
@@ -1053,11 +949,10 @@ function ReceivingEngine({ sites, onIngested, onOpenSite }) {
                     <CheckCircle2 size={15} /> Batch processed — orthomosaic ready for review
                   </div>
                   <p className="font-mono text-[11px] mb-3" style={{ color: C.faint }}>
-                    Demo note: baseline imagery for existing weeks is simulated. In production the aligner registers
-                    every frame in the batch against the site's true prior capture before diffing.
+                    The aligner registers every frame in this batch against the site's prior capture before diffing.
                   </p>
                   <button onClick={finish} className="btn-modern w-full py-2.5 rounded-lg font-body text-sm font-medium"
-                    style={{ background: C.cyan, color: "#0A0E13" }}>
+                    style={{ background: C.cyan, color: C.onAccent }}>
                     Add to flight log &amp; compare
                   </button>
                 </div>
@@ -1145,7 +1040,7 @@ function QuickCompare() {
               ].map((t) => (
                 <button key={t.id} onClick={() => setMode(t.id)}
                   className="btn-modern flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-body"
-                  style={{ background: mode === t.id ? C.orange : C.panel2, color: mode === t.id ? "#160C05" : C.muted, fontWeight: mode === t.id ? 600 : 400 }}>
+                  style={{ background: mode === t.id ? C.cyan : C.panel2, color: mode === t.id ? C.onAccent : C.muted, fontWeight: mode === t.id ? 600 : 400 }}>
                   <t.icon size={13} /> {t.label}
                 </button>
               ))}
@@ -1197,7 +1092,7 @@ function PrintableReport({ site, weekA, weekB, weeks }) {
     let cancelled = false;
     setLoading(true);
     (async () => {
-      const [ca, cb] = await Promise.all([sceneCanvas(site, weekA), sceneCanvas(site, weekB)]);
+      const [ca, cb] = await Promise.all([sceneCanvas(weekA), sceneCanvas(weekB)]);
       const { maskUrl, percent } = diffCanvases(ca, cb);
       const mergeCanvas = document.createElement("canvas");
       mergeCanvas.width = W; mergeCanvas.height = H;
@@ -1238,7 +1133,7 @@ function PrintableReport({ site, weekA, weekB, weeks }) {
         </p>
         <button onClick={() => window.print()}
           className="btn-modern flex items-center gap-2 px-4 py-2.5 rounded-lg font-body text-sm font-medium shrink-0"
-          style={{ background: C.orange, color: "#160C05", boxShadow: "0 8px 24px -8px rgba(255,93,46,0.45)" }}>
+          style={{ background: C.cyan, color: C.onAccent, boxShadow: "0 8px 24px -8px rgba(28,100,214,0.4)" }}>
           <Download size={15} /> Download PDF
         </button>
       </div>
@@ -1247,9 +1142,7 @@ function PrintableReport({ site, weekA, weekB, weeks }) {
         <div className="p-8 md:p-10">
           <div className="flex items-center justify-between mb-8">
             <div className="flex items-center gap-2">
-              <div className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ background: C.orange }}>
-                <Crosshair size={14} color="#160C05" />
-              </div>
+              <Logo size={26} />
               <span className="font-display text-sm font-semibold" style={{ color: INK.text }}>Wisconsin Aerial</span>
             </div>
             <span className="font-mono text-[9px] tracking-widest" style={{ color: INK.faint }}>SITE PROGRESS REPORT</span>
@@ -1338,15 +1231,18 @@ function ClientStat({ icon: Icon, label, value, tone = "muted" }) {
 
 function ClientPortal({ site, mode, onExitPreview, initialTab = "interactive" }) {
   const weeks = site._weeks;
-  const [selected, setSelected] = useState([weeks[weeks.length - 2].n, weeks[weeks.length - 1].n]);
+  const [selected, setSelected] = useState(() =>
+    weeks.length >= 2 ? [weeks[weeks.length - 2].n, weeks[weeks.length - 1].n] : weeks.length === 1 ? [weeks[0].n] : []
+  );
   const [latestPct, setLatestPct] = useState(null);
   const [tab, setTab] = useState(initialTab);
 
   useEffect(() => {
+    if (weeks.length < 2) return;
     let cancelled = false;
     (async () => {
       const a = weeks[weeks.length - 2], b = weeks[weeks.length - 1];
-      const [ca, cb] = await Promise.all([sceneCanvas(site, a), sceneCanvas(site, b)]);
+      const [ca, cb] = await Promise.all([sceneCanvas(a), sceneCanvas(b)]);
       if (!cancelled) setLatestPct(diffCanvases(ca, cb).percent);
     })();
     return () => { cancelled = true; };
@@ -1364,6 +1260,7 @@ function ClientPortal({ site, mode, onExitPreview, initialTab = "interactive" })
   const weekB = weeks.find((w) => w.n === (sorted[1] ?? sorted[0]));
   const Icon = site.icon;
   const first = weeks[0], last = weeks[weeks.length - 1];
+  const canDiff = weeks.length >= 2;
 
   return (
     <div className="min-h-screen font-body" style={{ background: C.bg }}>
@@ -1371,7 +1268,7 @@ function ClientPortal({ site, mode, onExitPreview, initialTab = "interactive" })
 
       {(mode === "preview" || mode === "client") && (
         <div className="no-print sticky top-0 z-20 flex items-center justify-between gap-3 px-4 py-2.5 flex-wrap"
-          style={{ background: mode === "preview" ? C.orange : C.cyan, color: mode === "preview" ? "#160C05" : "#0A0E13" }}>
+          style={{ background: mode === "preview" ? C.orange : C.cyan, color: mode === "preview" ? "#160C05" : C.onAccent }}>
           <div className="flex items-center gap-2 font-body text-xs font-medium">
             <Compass size={13} />
             {mode === "preview" ? <>Admin preview — this is exactly what {site.client} receives</> : <>Client access — {site.name}</>}
@@ -1386,9 +1283,7 @@ function ClientPortal({ site, mode, onExitPreview, initialTab = "interactive" })
       <header className="no-print px-5 md:px-10 pt-8 pb-6" style={{ borderBottom: `1px solid ${C.line}` }}>
         <div className="max-w-4xl mx-auto">
           <div className="flex items-center gap-2 mb-6">
-            <div className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ background: C.orange }}>
-              <Crosshair size={14} color="#160C05" />
-            </div>
+            <Logo size={30} />
             <span className="font-display text-sm font-semibold" style={{ color: C.text }}>Wisconsin Aerial</span>
             <span className="font-mono text-[9px] tracking-widest ml-1" style={{ color: C.faint }}>CLIENT REPORT</span>
           </div>
@@ -1408,48 +1303,57 @@ function ClientPortal({ site, mode, onExitPreview, initialTab = "interactive" })
       <main className="px-5 md:px-10 py-8 max-w-4xl mx-auto">
         <div className="no-print grid grid-cols-2 md:grid-cols-4 gap-3 mb-8">
           <ClientStat icon={Plane} label="Total flights" value={weeks.length} />
-          <ClientStat icon={Clock} label="Tracking since" value={first.date} />
-          <ClientStat icon={Calendar} label="Latest capture" value={last.date} />
+          <ClientStat icon={Clock} label="Tracking since" value={first?.date ?? "—"} />
+          <ClientStat icon={Calendar} label="Latest capture" value={last?.date ?? "—"} />
           <ClientStat icon={TrendingUp} label="Change, last flight" tone="orange"
-            value={latestPct === null ? "…" : `${latestPct.toFixed(1)}%`} />
+            value={!canDiff ? "—" : latestPct === null ? "…" : `${latestPct.toFixed(1)}%`} />
         </div>
 
-        <div className="no-print mb-3 flex items-center gap-2">
-          <ChevronDown size={13} color={C.faint} />
-          <h2 className="font-display text-base font-semibold" style={{ color: C.text }}>Flight history</h2>
-        </div>
-        <div className="no-print mb-6">
-          <FlightLogStrip weeks={weeks} selected={selected} onToggle={toggle} />
-        </div>
-
-        <div className="no-print flex items-center gap-2 mb-5 rounded-lg p-1 w-fit" style={{ background: C.panel2, border: `1px solid ${C.line}` }}>
-          {[
-            { id: "interactive", label: "Interactive report", icon: SlidersHorizontal },
-            { id: "pdf", label: "PDF report", icon: FileText },
-          ].map((t) => (
-            <button key={t.id} onClick={() => setTab(t.id)}
-              className="btn-modern flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-body"
-              style={{ background: tab === t.id ? C.orange : "transparent", color: tab === t.id ? "#160C05" : C.muted, fontWeight: tab === t.id ? 600 : 400 }}>
-              <t.icon size={13} /> {t.label}
-            </button>
-          ))}
-        </div>
-
-        {selected.length < 2 ? (
-          <div className="no-print rounded-xl p-8 text-center font-body text-sm" style={{ background: C.panel, border: `1px solid ${C.line}`, color: C.muted }}>
-            Select one more capture above to compare.
+        {weeks.length === 0 ? (
+          <div className="no-print rounded-xl p-10 text-center font-body text-sm flex flex-col items-center gap-2" style={{ background: C.panel, border: `1px solid ${C.line}`, color: C.muted }}>
+            <Satellite size={20} color={C.faint} />
+            Your project pilot hasn't logged any flights yet — check back soon.
           </div>
-        ) : tab === "interactive" ? (
-          <CompareWorkspace site={site} weekA={weekA} weekB={weekB} />
         ) : (
-          <PrintableReport site={site} weekA={weekA} weekB={weekB} weeks={weeks} />
+          <>
+            <div className="no-print mb-3 flex items-center gap-2">
+              <ChevronDown size={13} color={C.faint} />
+              <h2 className="font-display text-base font-semibold" style={{ color: C.text }}>Flight history</h2>
+            </div>
+            <div className="no-print mb-6">
+              <FlightLogStrip weeks={weeks} selected={selected} onToggle={toggle} />
+            </div>
+
+            <div className="no-print flex items-center gap-2 mb-5 rounded-lg p-1 w-fit" style={{ background: C.panel2, border: `1px solid ${C.line}` }}>
+              {[
+                { id: "interactive", label: "Interactive report", icon: SlidersHorizontal },
+                { id: "pdf", label: "PDF report", icon: FileText },
+              ].map((t) => (
+                <button key={t.id} onClick={() => setTab(t.id)}
+                  className="btn-modern flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-body"
+                  style={{ background: tab === t.id ? C.cyan : "transparent", color: tab === t.id ? "#FFFFFF" : C.muted, fontWeight: tab === t.id ? 600 : 400 }}>
+                  <t.icon size={13} /> {t.label}
+                </button>
+              ))}
+            </div>
+
+            {selected.length < 2 ? (
+              <div className="no-print rounded-xl p-8 text-center font-body text-sm" style={{ background: C.panel, border: `1px solid ${C.line}`, color: C.muted }}>
+                {weeks.length === 1 ? "Only one capture so far — comparisons will appear after the next flight." : "Select one more capture above to compare."}
+              </div>
+            ) : tab === "interactive" ? (
+              <CompareWorkspace site={site} weekA={weekA} weekB={weekB} />
+            ) : (
+              <PrintableReport site={site} weekA={weekA} weekB={weekB} weeks={weeks} />
+            )}
+          </>
         )}
 
         <footer className="no-print mt-12 pt-6 flex items-center justify-between flex-wrap gap-2" style={{ borderTop: `1px solid ${C.line}` }}>
           <span className="font-mono text-[10px]" style={{ color: C.faint }}>
             Flown &amp; processed by Wisconsin Aerial · questions go to your project pilot
           </span>
-          <span className="font-mono text-[10px]" style={{ color: C.faint }}>Report generated {last.date}</span>
+          <span className="font-mono text-[10px]" style={{ color: C.faint }}>Report generated {last?.date ?? "—"}</span>
         </footer>
       </main>
     </div>
@@ -1487,16 +1391,14 @@ function AccessGate({ sites, onAdminLogin, onClientAccess }) {
     <div className="min-h-screen flex items-center justify-center font-body p-5" style={{ background: C.bg }}>
       <style>{FONTS}</style>
       <div className="ambient-glow pointer-events-none fixed -top-40 -left-32 w-[560px] h-[560px] rounded-full"
-        style={{ background: "radial-gradient(circle, rgba(11,165,147,0.14), transparent 70%)", filter: "blur(10px)", zIndex: 0 }} />
+        style={{ background: "radial-gradient(circle, rgba(28,100,214,0.14), transparent 70%)", filter: "blur(10px)", zIndex: 0 }} />
       <div className="ambient-glow pointer-events-none fixed -bottom-52 -right-40 w-[620px] h-[620px] rounded-full"
-        style={{ background: "radial-gradient(circle, rgba(255,93,46,0.10), transparent 70%)", filter: "blur(10px)", zIndex: 0, animationDelay: "-7s" }} />
+        style={{ background: "radial-gradient(circle, rgba(126,193,250,0.20), transparent 70%)", filter: "blur(10px)", zIndex: 0, animationDelay: "-7s" }} />
 
       <div className="fade-in-up relative z-10 w-full max-w-sm rounded-2xl p-7"
         style={{ background: C.panel, border: `1px solid ${C.line}`, boxShadow: "0 24px 60px -24px rgba(18,24,38,0.25)" }}>
         <div className="flex items-center gap-2 mb-6 justify-center">
-          <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ background: C.orange, boxShadow: "0 6px 18px -6px rgba(255,93,46,0.5)" }}>
-            <Crosshair size={16} color="#160C05" />
-          </div>
+          <Logo size={34} />
           <div>
             <div className="font-display text-sm font-semibold leading-none" style={{ color: C.text }}>Wisconsin</div>
             <div className="font-mono text-[9px] tracking-widest" style={{ color: C.faint }}>AERIAL</div>
@@ -1513,7 +1415,7 @@ function AccessGate({ sites, onAdminLogin, onClientAccess }) {
             <button onClick={() => { setMode("client"); setError(null); }}
               className="btn-modern w-full flex items-center gap-3 px-4 py-3 rounded-xl font-body text-sm"
               style={{ background: C.panel2, border: `1px solid ${C.line}`, color: C.text }}>
-              <KeyRound size={16} color={C.orange} /> I have a client access code
+              <KeyRound size={16} color={C.cyan} /> I have a client access code
             </button>
           </div>
         )}
@@ -1537,7 +1439,7 @@ function AccessGate({ sites, onAdminLogin, onClientAccess }) {
               </div>
             )}
             <button type="submit" className="btn-modern w-full py-2.5 rounded-lg font-body text-sm font-medium"
-              style={{ background: C.orange, color: "#160C05", boxShadow: "0 8px 24px -8px rgba(255,93,46,0.45)" }}>
+              style={{ background: C.cyan, color: C.onAccent, boxShadow: "0 8px 24px -8px rgba(28,100,214,0.4)" }}>
               Sign in
             </button>
             <button type="button" onClick={() => { setMode("choose"); setError(null); }}
@@ -1564,7 +1466,7 @@ function AccessGate({ sites, onAdminLogin, onClientAccess }) {
               </div>
             )}
             <button type="submit" className="btn-modern w-full py-2.5 rounded-lg font-body text-sm font-medium"
-              style={{ background: C.cyan, color: "#0A0E13" }}>
+              style={{ background: C.cyan, color: C.onAccent, boxShadow: "0 8px 24px -8px rgba(28,100,214,0.4)" }}>
               View my project
             </button>
             <button type="button" onClick={() => { setMode("choose"); setError(null); }}
@@ -1610,8 +1512,6 @@ function ProjectForm({ mode, initial, onCancel, onSave, onDelete }) {
   const [iconKey, setIconKey] = useState(initial?.iconKey || "Building2");
   const [lat, setLat] = useState(initial?.lat ?? "");
   const [lon, setLon] = useState(initial?.lon ?? "");
-  const [terrainA, setTerrainA] = useState(initial?.terrain?.[0] || "#5c5642");
-  const [terrainB, setTerrainB] = useState(initial?.terrain?.[1] || "#47422f");
   const [clientAccessEnabled, setClientAccessEnabled] = useState(initial?.clientAccessEnabled ?? true);
   const [accessCode, setAccessCode] = useState(initial?.accessCode || "");
   const [copied, setCopied] = useState(false);
@@ -1636,7 +1536,6 @@ function ProjectForm({ mode, initial, onCancel, onSave, onDelete }) {
       iconKey,
       lat: lat === "" ? 0 : Number(lat),
       lon: lon === "" ? 0 : Number(lon),
-      terrain: [terrainA, terrainB],
       clientAccessEnabled,
       accessCode: accessCode || defaultAccessCode(initial?.id || name),
     });
@@ -1683,16 +1582,7 @@ function ProjectForm({ mode, initial, onCancel, onSave, onDelete }) {
               {ICON_OPTIONS.map((k) => <option key={k} value={k}>{k}</option>)}
             </select>
           </FormField>
-          <div className="grid grid-cols-2 gap-2">
-            <FormField label="Terrain A">
-              <input type="color" value={terrainA} onChange={(e) => setTerrainA(e.target.value)}
-                className="w-full h-[38px] rounded-lg cursor-pointer" style={{ border: `1px solid ${C.line}`, background: "none" }} />
-            </FormField>
-            <FormField label="Terrain B">
-              <input type="color" value={terrainB} onChange={(e) => setTerrainB(e.target.value)}
-                className="w-full h-[38px] rounded-lg cursor-pointer" style={{ border: `1px solid ${C.line}`, background: "none" }} />
-            </FormField>
-          </div>
+          <div />
           <FormField label="Latitude">
             <input type="number" step="any" value={lat} onChange={(e) => setLat(e.target.value)}
               className="w-full rounded-lg px-3 py-2 font-body text-sm outline-none" style={inputStyle} />
@@ -1710,7 +1600,7 @@ function ProjectForm({ mode, initial, onCancel, onSave, onDelete }) {
           <label className="flex items-center justify-between mb-3 cursor-pointer">
             <span className="font-body text-xs" style={{ color: C.muted }}>Allow client access with this project's code</span>
             <input type="checkbox" checked={clientAccessEnabled} onChange={(e) => setClientAccessEnabled(e.target.checked)}
-              className="w-4 h-4 accent-orange-500" />
+              className="w-4 h-4 accent-blue-600" />
           </label>
           {mode === "edit" && (
             <div className="flex items-center gap-2">
@@ -1743,7 +1633,7 @@ function ProjectForm({ mode, initial, onCancel, onSave, onDelete }) {
           <div className="flex items-center gap-2">
             <button type="button" onClick={onCancel} className="font-body text-xs px-3 py-2" style={{ color: C.muted }}>Cancel</button>
             <button type="submit" className="btn-modern px-4 py-2 rounded-lg font-body text-sm font-medium"
-              style={{ background: C.orange, color: "#160C05", boxShadow: "0 8px 24px -8px rgba(255,93,46,0.45)" }}>
+              style={{ background: C.cyan, color: C.onAccent, boxShadow: "0 8px 24px -8px rgba(28,100,214,0.4)" }}>
               {mode === "create" ? "Create project" : "Save changes"}
             </button>
           </div>
@@ -1771,7 +1661,7 @@ function AdminControls({ sites, onCreate, onUpdate, onDelete }) {
         </div>
         <button onClick={() => setEditing("new")}
           className="btn-modern flex items-center gap-1.5 px-3.5 py-2.5 rounded-lg font-body text-sm font-medium shrink-0"
-          style={{ background: C.orange, color: "#160C05", boxShadow: "0 8px 24px -8px rgba(255,93,46,0.45)" }}>
+          style={{ background: C.cyan, color: C.onAccent, boxShadow: "0 8px 24px -8px rgba(28,100,214,0.4)" }}>
           <Plus size={15} /> New project
         </button>
       </div>
@@ -1825,7 +1715,7 @@ function AdminControls({ sites, onCreate, onUpdate, onDelete }) {
 /*  Root app                                                            */
 /* ------------------------------------------------------------------ */
 export default function App() {
-  const [sites, setSites] = useState(() => loadPersistedSites() ?? buildDefaultSites());
+  const [sites, setSites] = useState(() => loadPersistedSites() ?? []);
   const [session, setSession] = useState(() => loadPersistedSession());
   const [view, setView] = useState("dashboard");
   const [activeSiteId, setActiveSiteId] = useState(null);
@@ -1888,16 +1778,14 @@ export default function App() {
 
       {/* ambient background glow — signature modern touch, quiet and slow */}
       <div className="ambient-glow pointer-events-none fixed -top-40 -left-32 w-[560px] h-[560px] rounded-full"
-        style={{ background: "radial-gradient(circle, rgba(11,165,147,0.14), transparent 70%)", filter: "blur(10px)", zIndex: 0 }} />
+        style={{ background: "radial-gradient(circle, rgba(28,100,214,0.14), transparent 70%)", filter: "blur(10px)", zIndex: 0 }} />
       <div className="ambient-glow pointer-events-none fixed -bottom-52 -right-40 w-[620px] h-[620px] rounded-full"
-        style={{ background: "radial-gradient(circle, rgba(255,93,46,0.10), transparent 70%)", filter: "blur(10px)", zIndex: 0, animationDelay: "-7s" }} />
+        style={{ background: "radial-gradient(circle, rgba(126,193,250,0.20), transparent 70%)", filter: "blur(10px)", zIndex: 0, animationDelay: "-7s" }} />
 
       <aside className="glass w-56 shrink-0 p-4 flex-col gap-1 hidden md:flex relative z-10"
         style={{ borderRight: `1px solid ${C.line}`, background: "rgba(255,255,255,0.72)" }}>
         <div className="flex items-center gap-2 px-2 mb-6">
-          <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ background: C.orange, boxShadow: "0 6px 18px -6px rgba(255,93,46,0.5)" }}>
-            <Crosshair size={16} color="#160C05" />
-          </div>
+          <Logo size={34} />
           <div>
             <div className="font-display text-sm font-semibold leading-none" style={{ color: C.text }}>Wisconsin</div>
             <div className="font-mono text-[9px] tracking-widest" style={{ color: C.faint }}>AERIAL</div>
@@ -1907,12 +1795,16 @@ export default function App() {
         <NavButton active={view === "ingest"} icon={FolderInput} label="Receiving engine" onClick={() => setView("ingest")} />
         <NavButton active={view === "quick"} icon={ArrowLeftRight} label="Quick compare" onClick={() => setView("quick")} />
         <NavButton active={view === "admin"} icon={Settings} label="Admin controls" onClick={() => setView("admin")} />
-        <div className="mt-6 px-2 font-mono text-[9px] uppercase tracking-widest" style={{ color: C.faint }}>Sites</div>
-        {sites.map((s) => (
-          <NavButton key={s.id} active={view === "site" && activeSiteId === s.id} icon={s.icon}
-            label={s.name.split(" — ")[0].split(" Estates")[0]}
-            onClick={() => openSite(s.id)} />
-        ))}
+        {sites.length > 0 && (
+          <>
+            <div className="mt-6 px-2 font-mono text-[9px] uppercase tracking-widest" style={{ color: C.faint }}>Sites</div>
+            {sites.map((s) => (
+              <NavButton key={s.id} active={view === "site" && activeSiteId === s.id} icon={s.icon}
+                label={s.name.split(" — ")[0].split(" Estates")[0]}
+                onClick={() => openSite(s.id)} />
+            ))}
+          </>
+        )}
         <div className="mt-auto px-2 pt-4" style={{ borderTop: `1px solid ${C.line}` }}>
           <button onClick={signOut} className="btn-modern w-full flex items-center gap-2 pt-3 font-mono text-[10px]" style={{ color: C.faint }}>
             <LogOut size={12} /> Sign out (admin)
@@ -1931,11 +1823,15 @@ export default function App() {
       </div>
 
       <main className="flex-1 p-5 md:p-8 pt-16 md:pt-8 max-w-4xl relative z-10">
-        {view === "dashboard" && <Dashboard sites={sites} onOpen={openSite} />}
+        {view === "dashboard" && <Dashboard sites={sites} onOpen={openSite} onGoToAdmin={() => setView("admin")} />}
         {view === "site" && activeSite && (
-          <SiteDetail site={activeSite} onBack={() => setView("dashboard")} onPreviewClient={previewClient} />
+          <SiteDetail site={activeSite} onBack={() => setView("dashboard")} onPreviewClient={previewClient}
+            onGoToIngest={() => setView("ingest")} />
         )}
-        {view === "ingest" && <ReceivingEngine sites={sites} onIngested={handleIngested} onOpenSite={openSite} />}
+        {view === "ingest" && (
+          <ReceivingEngine sites={sites} onIngested={handleIngested} onOpenSite={openSite}
+            onGoToAdmin={() => setView("admin")} />
+        )}
         {view === "quick" && <QuickCompare />}
         {view === "admin" && (
           <AdminControls sites={sites} onCreate={createProject} onUpdate={updateProject} onDelete={deleteProject} />
