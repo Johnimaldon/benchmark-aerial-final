@@ -1364,7 +1364,7 @@ function ClientPortal({ site, mode, onExitPreview, initialTab = "interactive" })
 /*  Access gate — admin sign-in vs client access code                   */
 /* ------------------------------------------------------------------ */
 // Demo-grade check only: there is no backend, so this can't be a real secret.
-const ADMIN_PASSCODE = "wisconsin-admin";
+const ADMIN_PASSCODE = "AMDG";
 
 function AccessGate({ sites, onAdminLogin, onClientAccess }) {
   const [mode, setMode] = useState("choose");
