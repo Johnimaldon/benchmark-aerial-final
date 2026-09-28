@@ -659,7 +659,33 @@ function ShareModal({ site, onClose, onPreview }) {
   );
 }
 
-function SiteDetail({ site, onBack, onPreviewClient, onGoToIngest }) {
+function WeekTradesRow({ week, onSave }) {
+  const [editing, setEditing] = useState(false);
+  const trades = week.trades || [];
+
+  return (
+    <div className="rounded-lg p-3" style={{ background: C.panel, border: `1px solid ${C.line}` }}>
+      <div className="flex items-center justify-between gap-2">
+        <span className="font-mono text-xs" style={{ color: C.text }}>W{week.n} · {week.date}</span>
+        <button onClick={() => setEditing((v) => !v)} className="font-mono text-[10px] uppercase tracking-widest" style={{ color: C.cyan }}>
+          {editing ? "Done" : "Edit trades"}
+        </button>
+      </div>
+      {editing ? (
+        <div className="mt-3">
+          <TradesEditor trades={trades} onChange={(next) => onSave(week.n, next)} />
+        </div>
+      ) : (
+        <div className="flex flex-wrap gap-1.5 mt-2">
+          {trades.length ? trades.map((t) => <Badge key={t} tone="cyan">{t}</Badge>) :
+            <span className="font-mono text-[11px]" style={{ color: C.faint }}>No trades logged</span>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SiteDetail({ site, onBack, onPreviewClient, onGoToIngest, onUpdateTrades }) {
   const weeks = site._weeks;
   const [selected, setSelected] = useState(() =>
     weeks.length >= 2 ? [weeks[weeks.length - 2].n, weeks[weeks.length - 1].n] : weeks.length === 1 ? [weeks[0].n] : []
@@ -730,6 +756,15 @@ function SiteDetail({ site, onBack, onPreviewClient, onGoToIngest }) {
           ) : (
             <CompareWorkspace site={site} weekA={weekA} weekB={weekB} />
           )}
+
+          <div className="mt-6">
+            <h2 className="font-display text-base font-semibold mb-3" style={{ color: C.text }}>Trades on site</h2>
+            <div className="space-y-2">
+              {[...weeks].reverse().map((w) => (
+                <WeekTradesRow key={w.n} week={w} onSave={(n, trades) => onUpdateTrades(site.id, n, trades)} />
+              ))}
+            </div>
+          </div>
         </>
       )}
 
@@ -752,6 +787,27 @@ const PIPELINE_STEPS = [
   { label: "Aligning to the prior capture", icon: SlidersHorizontal },
   { label: "Running change-detection analysis", icon: TrendingUp },
 ];
+
+const TRADE_OPTIONS = [
+  "Excavation", "Concrete", "Framing", "Roofing", "Electrical",
+  "Plumbing", "HVAC", "Drywall", "Painting", "Landscaping",
+];
+
+function TradesEditor({ trades, onChange }) {
+  const toggle = (t) => {
+    onChange(trades.includes(t) ? trades.filter((x) => x !== t) : [...trades, t]);
+  };
+  return (
+    <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-2">
+      {TRADE_OPTIONS.map((t) => (
+        <label key={t} className="flex items-center gap-2 cursor-pointer font-body text-xs" style={{ color: C.text }}>
+          <input type="checkbox" checked={trades.includes(t)} onChange={() => toggle(t)} className="w-4 h-4 shrink-0 accent-blue-600" />
+          {t}
+        </label>
+      ))}
+    </div>
+  );
+}
 
 function metersToDeg(m) { return m / 111111; }
 
@@ -776,6 +832,7 @@ function ReceivingEngine({ sites, onIngested, onOpenSite, onGoToAdmin }) {
   const [siteId, setSiteId] = useState(null);
   const [confidence, setConfidence] = useState(null);
   const [stage, setStage] = useState(-1);
+  const [tradesOnSite, setTradesOnSite] = useState([]);
   const timerRef = useRef(null);
 
   const site = sites.find((s) => s.id === (siteId || detectedId));
@@ -803,7 +860,7 @@ function ReceivingEngine({ sites, onIngested, onOpenSite, onGoToAdmin }) {
     setStage(-1);
   };
 
-  const clearBatch = () => { setReceived([]); setDetectedId(null); setSiteId(null); setConfidence(null); setStage(-1); };
+  const clearBatch = () => { setReceived([]); setDetectedId(null); setSiteId(null); setConfidence(null); setStage(-1); setTradesOnSite([]); };
 
   const begin = () => {
     setStage(0);
@@ -823,7 +880,7 @@ function ReceivingEngine({ sites, onIngested, onOpenSite, onGoToAdmin }) {
   const finish = () => {
     const weeks = site._weeks;
     const nextN = weeks.length ? weeks[weeks.length - 1].n + 1 : 1;
-    onIngested(site.id, { n: nextN, date: formatShortDate(), real: true, dataUrl: hero.dataUrl, sourceCount: received.length });
+    onIngested(site.id, { n: nextN, date: formatShortDate(), real: true, dataUrl: hero.dataUrl, sourceCount: received.length, trades: tradesOnSite });
     onOpenSite(site.id);
   };
 
@@ -948,9 +1005,15 @@ function ReceivingEngine({ sites, onIngested, onOpenSite, onGoToAdmin }) {
                   <div className="flex items-center gap-2 mb-3 font-body text-sm" style={{ color: C.ok }}>
                     <CheckCircle2 size={15} /> Batch processed — orthomosaic ready for review
                   </div>
-                  <p className="font-mono text-[11px] mb-3" style={{ color: C.faint }}>
+                  <p className="font-mono text-[11px] mb-4" style={{ color: C.faint }}>
                     The aligner registers every frame in this batch against the site's prior capture before diffing.
                   </p>
+                  <div className="rounded-lg p-4 mb-4" style={{ background: C.panel2, border: `1px solid ${C.line}` }}>
+                    <div className="font-mono text-[10px] uppercase tracking-widest mb-3" style={{ color: C.faint }}>
+                      Trades on site this flight
+                    </div>
+                    <TradesEditor trades={tradesOnSite} onChange={setTradesOnSite} />
+                  </div>
                   <button onClick={finish} className="btn-modern w-full py-2.5 rounded-lg font-body text-sm font-medium"
                     style={{ background: C.cyan, color: C.onAccent }}>
                     Add to flight log &amp; compare
@@ -1086,6 +1149,7 @@ function PrintableReport({ site, weekA, weekB, weeks }) {
   const [imgB, setImgB] = useState(null);
   const [merged, setMerged] = useState(null);
   const [pct, setPct] = useState(null);
+  const [allCaptures, setAllCaptures] = useState([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -1103,15 +1167,22 @@ function PrintableReport({ site, weekA, weekB, weeks }) {
       mctx.globalAlpha = 0.85;
       mctx.drawImage(maskImg, 0, 0);
       mctx.globalAlpha = 1;
+
+      const captures = await Promise.all(weeks.map(async (w) => {
+        const c = w.n === weekA.n ? ca : w.n === weekB.n ? cb : await sceneCanvas(w);
+        return { n: w.n, date: w.date, trades: w.trades || [], url: c.toDataURL() };
+      }));
+
       if (cancelled) return;
       setImgA(ca.toDataURL());
       setImgB(cb.toDataURL());
       setMerged(mergeCanvas.toDataURL());
       setPct(percent);
+      setAllCaptures(captures);
       setLoading(false);
     })();
     return () => { cancelled = true; };
-  }, [site, weekA, weekB]);
+  }, [site, weekA, weekB, weeks]);
 
   const today = new Date().toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" });
 
@@ -1191,13 +1262,17 @@ function PrintableReport({ site, weekA, weekB, weeks }) {
             Orange-highlighted regions mark automated, pixel-level change between the two captures above — {pct.toFixed(1)}% of the visible site surface.
           </div>
 
-          <div className="font-display text-sm font-semibold mb-3" style={{ color: INK.text }}>Flight history</div>
-          <div className="rounded-lg overflow-hidden mb-8" style={{ border: `1px solid ${INK.line}` }}>
-            {weeks.map((w, i) => (
-              <div key={w.n} className="flex items-center justify-between px-3 py-2 font-mono text-[11px]"
-                style={{ background: i % 2 ? "#FFFFFF" : INK.panel, color: INK.muted, borderTop: i ? `1px solid ${INK.line}` : "none" }}>
-                <span style={{ color: INK.text }}>Flight W{w.n}</span>
-                <span>{w.date}{w.real ? " · client-supplied capture" : ""}</span>
+          <div className="font-display text-sm font-semibold mb-3" style={{ color: INK.text }}>
+            All flight captures ({allCaptures.length})
+          </div>
+          <div className="grid grid-cols-3 gap-3 mb-8">
+            {allCaptures.map((c) => (
+              <div key={c.n}>
+                <img src={c.url} className="w-full rounded-lg" style={{ border: `1px solid ${INK.line}`, aspectRatio: `${W}/${H}`, objectFit: "cover" }} />
+                <div className="font-mono text-[9.5px] mt-1.5" style={{ color: INK.text }}>W{c.n} · {c.date}</div>
+                <div className="font-mono text-[8.5px] mt-0.5" style={{ color: INK.muted }}>
+                  {c.trades.length ? c.trades.join(", ") : "No trades logged"}
+                </div>
               </div>
             ))}
           </div>
@@ -1732,6 +1807,12 @@ export default function App() {
     setSites((prev) => prev.map((s) => (s.id === siteId ? { ...s, _weeks: [...s._weeks, weekEntry] } : s)));
   };
 
+  const updateWeekTrades = (siteId, weekN, trades) => {
+    setSites((prev) => prev.map((s) => (s.id === siteId
+      ? { ...s, _weeks: s._weeks.map((w) => (w.n === weekN ? { ...w, trades } : w)) }
+      : s)));
+  };
+
   const createProject = (data) => {
     setSites((prev) => [...prev, makeNewProject(data, prev.map((s) => s.id))]);
   };
@@ -1826,7 +1907,7 @@ export default function App() {
         {view === "dashboard" && <Dashboard sites={sites} onOpen={openSite} onGoToAdmin={() => setView("admin")} />}
         {view === "site" && activeSite && (
           <SiteDetail site={activeSite} onBack={() => setView("dashboard")} onPreviewClient={previewClient}
-            onGoToIngest={() => setView("ingest")} />
+            onGoToIngest={() => setView("ingest")} onUpdateTrades={updateWeekTrades} />
         )}
         {view === "ingest" && (
           <ReceivingEngine sites={sites} onIngested={handleIngested} onOpenSite={openSite}
