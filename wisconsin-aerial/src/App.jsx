@@ -6,7 +6,8 @@ import {
   Share2, Copy, Check, ShieldCheck, LogOut, Satellite, FolderInput,
   Images, Compass, Clock, ChevronDown, Download, FileText,
   Lock, KeyRound, Settings, Trash2, Plus, Pencil, RefreshCw, ShieldAlert,
-  Factory, Warehouse, TreePine, Eye, EyeOff, AlertCircle, UserCog
+  Factory, Warehouse, TreePine, Eye, EyeOff, AlertCircle, UserCog,
+  Sparkles, Video, Image as ImageIcon, ScrollText
 } from "lucide-react";
 
 /* ------------------------------------------------------------------ */
@@ -165,6 +166,31 @@ function uniqueId(base, existingIds) {
 
 function formatShortDate(date = new Date()) {
   return date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+}
+
+// Drafts a narrative locally from the trades/week data already on hand — there is
+// no backend in this build to safely hold an LLM API key, so this is a deterministic
+// template fill rather than a live model call. Same site+week always drafts the same
+// way, so re-generating is stable until the underlying data changes.
+function generateActivityNarrative(site, week) {
+  const rng = mulberry32(hashStr(site.id + "-narrative-" + week.n));
+  const pick = (arr) => arr[Math.floor(rng() * arr.length)];
+  const trades = week.trades && week.trades.length ? week.trades.join(", ") : null;
+
+  const opener = pick([
+    `Flight W${week.n} (${week.date}) documents`,
+    `This week's capture at ${site.name} recorded`,
+    `The ${week.date} flight over ${site.name} shows`,
+  ]);
+  const activity = trades
+    ? `active ${trades.toLowerCase()} work across the site`
+    : `stable site conditions with no specific trade activity logged for this flight`;
+  const closer = pick([
+    "Imagery is aligned to the prior capture for accurate week-over-week comparison.",
+    "This capture is registered against the previous flight to support precise progress tracking.",
+    "Findings are cross-referenced against the prior week's capture for documentation continuity.",
+  ]);
+  return `${opener} ${activity}. ${closer}`;
 }
 
 function hydrateSite(raw) {
@@ -511,6 +537,71 @@ function CompareWorkspace({ site, weekA, weekB }) {
   );
 }
 
+function MediaTypeGallery({ type, weekA, weekB }) {
+  const meta = MEDIA_TABS.find((t) => t.id === type);
+  const label = meta ? meta.label : type;
+
+  const renderItem = (m) => (
+    m.type === "video" ? (
+      <video key={m.id} src={m.url} controls className="w-full rounded-lg"
+        style={{ border: `1px solid ${C.line}`, aspectRatio: `${W}/${H}`, background: "#000" }} />
+    ) : (
+      <img key={m.id} src={m.url} className="w-full rounded-lg object-cover"
+        style={{ border: `1px solid ${C.line}`, aspectRatio: `${W}/${H}` }} />
+    )
+  );
+
+  const renderColumn = (week) => {
+    const items = mediaForWeek(week, type);
+    return (
+      <div>
+        <div className="font-mono text-[11px] mb-2" style={{ color: C.faint }}>W{week.n} · {week.date}</div>
+        {items.length ? (
+          <div className="space-y-3">{items.map(renderItem)}</div>
+        ) : (
+          <div className="rounded-lg p-8 text-center font-mono text-xs flex items-center justify-center"
+            style={{ background: C.panel2, color: C.faint, border: `1px dashed ${C.line}`, aspectRatio: `${W}/${H}` }}>
+            No {label.toLowerCase()} for this week
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  return (
+    <div className="fade-in-up rounded-xl p-4" style={{ background: C.panel, border: `1px solid ${C.line}` }}>
+      <div className="grid grid-cols-2 gap-4">
+        {renderColumn(weekA)}
+        {renderColumn(weekB)}
+      </div>
+    </div>
+  );
+}
+
+function MediaWorkspace({ site, weekA, weekB }) {
+  const [tab, setTab] = useState("still");
+  return (
+    <div>
+      <div className="flex items-center gap-2 mb-4 flex-wrap">
+        {MEDIA_TABS.map((t) => (
+          <button key={t.id} onClick={() => setTab(t.id)}
+            className="btn-modern flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-body"
+            style={{
+              background: tab === t.id ? C.cyan : C.panel2,
+              color: tab === t.id ? C.onAccent : C.muted,
+              fontWeight: tab === t.id ? 600 : 400,
+            }}>
+            <t.icon size={13} /> {t.label}
+          </button>
+        ))}
+      </div>
+      {tab === "still"
+        ? <CompareWorkspace site={site} weekA={weekA} weekB={weekB} />
+        : <MediaTypeGallery type={tab} weekA={weekA} weekB={weekB} />}
+    </div>
+  );
+}
+
 /* ------------------------------------------------------------------ */
 /*  Dashboard                                                            */
 /* ------------------------------------------------------------------ */
@@ -685,7 +776,114 @@ function WeekTradesRow({ week, onSave }) {
   );
 }
 
-function SiteDetail({ site, onBack, onPreviewClient, onGoToIngest, onUpdateTrades }) {
+function WeekNoteRow({ site, week, onSave }) {
+  const [editing, setEditing] = useState(false);
+  const note = week.note || "";
+  const mode = week.noteMode || "manual";
+  const [draft, setDraft] = useState(note);
+  const [draftMode, setDraftMode] = useState(mode);
+
+  const startEditing = () => { setDraft(note); setDraftMode(mode); setEditing(true); };
+  const generate = () => { setDraft(generateActivityNarrative(site, week)); setDraftMode("ai"); };
+  const save = () => { onSave(week.n, draft, draftMode); setEditing(false); };
+
+  return (
+    <div className="rounded-lg p-3" style={{ background: C.panel, border: `1px solid ${C.line}` }}>
+      <div className="flex items-center justify-between gap-2">
+        <span className="font-mono text-xs" style={{ color: C.text }}>W{week.n} · {week.date}</span>
+        <div className="flex items-center gap-2">
+          {note && !editing && <Badge tone={mode === "ai" ? "cyan" : "muted"}>{mode === "ai" ? "AI draft" : "Manual"}</Badge>}
+          {!editing && (
+            <button onClick={startEditing} className="font-mono text-[10px] uppercase tracking-widest" style={{ color: C.cyan }}>
+              {note ? "Edit" : "Add narrative"}
+            </button>
+          )}
+        </div>
+      </div>
+      {editing ? (
+        <div className="mt-2 space-y-2">
+          <textarea value={draft} onChange={(e) => { setDraft(e.target.value); setDraftMode("manual"); }} rows={3}
+            placeholder="Describe what's happening on site this week…"
+            className="w-full rounded-lg px-3 py-2 font-body text-xs outline-none resize-none" style={inputStyle} />
+          <div className="flex items-center gap-2 flex-wrap">
+            <button type="button" onClick={generate}
+              className="btn-modern flex items-center gap-1.5 px-3 py-1.5 rounded-md font-mono text-[10px]"
+              style={{ background: C.panel2, color: C.cyan, border: `1px solid ${C.line}` }}>
+              <Sparkles size={12} /> Generate draft
+            </button>
+            <button type="button" onClick={save}
+              className="btn-modern px-3 py-1.5 rounded-md font-mono text-[10px] font-medium" style={{ background: C.cyan, color: C.onAccent }}>
+              Save
+            </button>
+            <button type="button" onClick={() => setEditing(false)} className="font-mono text-[10px]" style={{ color: C.faint }}>
+              Cancel
+            </button>
+          </div>
+        </div>
+      ) : (
+        <p className="font-body text-xs mt-2 leading-relaxed" style={{ color: note ? C.muted : C.faint }}>
+          {note || "No activity narrative recorded."}
+        </p>
+      )}
+    </div>
+  );
+}
+
+function WeekMediaRow({ week, onAddMedia, onRemoveMedia }) {
+  const [type, setType] = useState("panorama");
+  const media = week.media || [];
+
+  const handleFile = (file) => {
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => onAddMedia(week.n, { id: `${week.n}-${Date.now()}`, type, url: reader.result, name: file.name });
+    reader.readAsDataURL(file);
+  };
+
+  return (
+    <div className="rounded-lg p-3" style={{ background: C.panel, border: `1px solid ${C.line}` }}>
+      <div className="flex items-center justify-between gap-2 mb-2 flex-wrap">
+        <span className="font-mono text-xs" style={{ color: C.text }}>W{week.n} · {week.date}</span>
+        <div className="flex items-center gap-1.5">
+          <select value={type} onChange={(e) => setType(e.target.value)}
+            className="rounded-md px-1.5 py-1 font-mono text-[10px] outline-none" style={inputStyle}>
+            {EXTRA_MEDIA_TYPES.map((m) => <option key={m.id} value={m.id}>{m.label}</option>)}
+          </select>
+          <label className="btn-modern flex items-center gap-1 px-2 py-1 rounded-md font-mono text-[10px] cursor-pointer"
+            style={{ background: C.panel2, border: `1px solid ${C.line}`, color: C.cyan }}>
+            <Plus size={11} /> Add
+            <input type="file" accept="image/*,video/*" className="hidden"
+              onChange={(e) => { handleFile(e.target.files[0]); e.target.value = ""; }} />
+          </label>
+        </div>
+      </div>
+      {media.length ? (
+        <div className="flex flex-wrap gap-2">
+          {media.map((m) => (
+            <div key={m.id} className="relative shrink-0 w-20 rounded-md overflow-hidden" style={{ border: `1px solid ${C.line}` }}>
+              {m.type === "video" ? (
+                <video src={m.url} className="w-full h-14 object-cover" muted />
+              ) : (
+                <img src={m.url} className="w-full h-14 object-cover" />
+              )}
+              <div className="absolute bottom-0 inset-x-0 px-1 py-0.5 font-mono text-[7.5px] text-center uppercase"
+                style={{ background: "rgba(10,14,20,0.6)", color: "#fff" }}>
+                {EXTRA_MEDIA_TYPES.find((t) => t.id === m.type)?.label}
+              </div>
+              <button onClick={() => onRemoveMedia(week.n, m.id)} className="absolute top-0.5 right-0.5 rounded-full p-0.5" style={{ background: "rgba(10,14,20,0.6)" }}>
+                <X size={10} color="#fff" />
+              </button>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <span className="font-mono text-[11px]" style={{ color: C.faint }}>No panorama, video, or ortho attachments yet</span>
+      )}
+    </div>
+  );
+}
+
+function SiteDetail({ site, onBack, onPreviewClient, onGoToIngest, onUpdateTrades, onUpdateNote, onAddMedia, onRemoveMedia }) {
   const weeks = site._weeks;
   const [selected, setSelected] = useState(() =>
     weeks.length >= 2 ? [weeks[weeks.length - 2].n, weeks[weeks.length - 1].n] : weeks.length === 1 ? [weeks[0].n] : []
@@ -754,7 +952,7 @@ function SiteDetail({ site, onBack, onPreviewClient, onGoToIngest, onUpdateTrade
                 : "Select one more capture on the flight log to build a comparison."}
             </div>
           ) : (
-            <CompareWorkspace site={site} weekA={weekA} weekB={weekB} />
+            <MediaWorkspace site={site} weekA={weekA} weekB={weekB} />
           )}
 
           <div className="mt-6">
@@ -762,6 +960,36 @@ function SiteDetail({ site, onBack, onPreviewClient, onGoToIngest, onUpdateTrade
             <div className="space-y-2">
               {[...weeks].reverse().map((w) => (
                 <WeekTradesRow key={w.n} week={w} onSave={(n, trades) => onUpdateTrades(site.id, n, trades)} />
+              ))}
+            </div>
+          </div>
+
+          <div className="mt-6">
+            <div className="flex items-center gap-2 mb-1">
+              <ScrollText size={15} color={C.cyan} />
+              <h2 className="font-display text-base font-semibold" style={{ color: C.text }}>Site activity narratives</h2>
+            </div>
+            <p className="font-body text-xs mb-3" style={{ color: C.muted }}>
+              Build a documented record of what happened on site each week — write it yourself or generate a draft from the logged trades.
+            </p>
+            <div className="space-y-2">
+              {[...weeks].reverse().map((w) => (
+                <WeekNoteRow key={w.n} site={site} week={w}
+                  onSave={(n, text, mode) => onUpdateNote(site.id, n, text, mode)} />
+              ))}
+            </div>
+          </div>
+
+          <div className="mt-6">
+            <h2 className="font-display text-base font-semibold mb-1" style={{ color: C.text }}>Media library</h2>
+            <p className="font-body text-xs mb-3" style={{ color: C.muted }}>
+              Attach panoramas, walkthrough video, or standalone ortho exports to any flight — viewable from the tabs above alongside stills.
+            </p>
+            <div className="space-y-2">
+              {[...weeks].reverse().map((w) => (
+                <WeekMediaRow key={w.n} week={w}
+                  onAddMedia={(n, item) => onAddMedia(site.id, n, item)}
+                  onRemoveMedia={(n, id) => onRemoveMedia(site.id, n, id)} />
               ))}
             </div>
           </div>
@@ -807,6 +1035,27 @@ function TradesEditor({ trades, onChange }) {
       ))}
     </div>
   );
+}
+
+/* ------------------------------------------------------------------ */
+/*  Media library — panoramas, video, and ortho exports per flight      */
+/* ------------------------------------------------------------------ */
+const MEDIA_TABS = [
+  { id: "still", label: "Stills", icon: SlidersHorizontal },
+  { id: "panorama", label: "Panoramas", icon: ImageIcon },
+  { id: "video", label: "Videos", icon: Video },
+  { id: "ortho", label: "Ortho", icon: Layers },
+];
+const EXTRA_MEDIA_TYPES = MEDIA_TABS.filter((t) => t.id !== "still");
+
+// The ortho tab reuses each week's primary capture (the pipeline already frames it as
+// "stitching orthomosaic composite"), plus any standalone ortho exports an admin attaches.
+function mediaForWeek(week, type) {
+  const extra = (week.media || []).filter((m) => m.type === type);
+  if (type === "ortho" && week.dataUrl) {
+    return [{ id: `ortho-primary-${week.n}`, type: "ortho", url: week.dataUrl, name: "Orthomosaic composite" }, ...extra];
+  }
+  return extra;
 }
 
 function metersToDeg(m) { return m / 111111; }
@@ -1170,7 +1419,7 @@ function PrintableReport({ site, weekA, weekB, weeks }) {
 
       const captures = await Promise.all(weeks.map(async (w) => {
         const c = w.n === weekA.n ? ca : w.n === weekB.n ? cb : await sceneCanvas(w);
-        return { n: w.n, date: w.date, trades: w.trades || [], url: c.toDataURL() };
+        return { n: w.n, date: w.date, trades: w.trades || [], note: w.note || "", url: c.toDataURL() };
       }));
 
       if (cancelled) return;
@@ -1216,7 +1465,10 @@ function PrintableReport({ site, weekA, weekB, weeks }) {
               <Logo size={26} />
               <span className="font-display text-sm font-semibold" style={{ color: INK.text }}>Wisconsin Aerial</span>
             </div>
-            <span className="font-mono text-[9px] tracking-widest" style={{ color: INK.faint }}>SITE PROGRESS REPORT</span>
+            <div className="text-right">
+              <div className="font-mono text-[9px] tracking-widest" style={{ color: INK.faint }}>SITE PROGRESS REPORT</div>
+              <div className="font-mono text-[8px] tracking-widest mt-0.5" style={{ color: C.cyan }}>PRECISION WEEK-OVER-WEEK DOCUMENTATION</div>
+            </div>
           </div>
 
           <div className="pb-6 mb-6" style={{ borderBottom: `1px solid ${INK.line}` }}>
@@ -1228,7 +1480,7 @@ function PrintableReport({ site, weekA, weekB, weeks }) {
             <div className="font-mono text-[10px] mt-2" style={{ color: INK.faint }}>Report generated {today}</div>
           </div>
 
-          <div className="grid grid-cols-4 gap-3 mb-8">
+          <div className="grid grid-cols-4 gap-3 mb-6">
             {[
               { label: "Total flights", value: weeks.length },
               { label: "Tracking since", value: weeks[0].date },
@@ -1240,6 +1492,13 @@ function PrintableReport({ site, weekA, weekB, weeks }) {
                 <div className="font-display text-base font-semibold" style={{ color: s.accent ? C.orange : INK.text }}>{s.value}</div>
               </div>
             ))}
+          </div>
+
+          <div className="rounded-lg p-4 mb-8" style={{ background: INK.panel, border: `1px solid ${INK.line}` }}>
+            <div className="font-mono text-[8.5px] uppercase tracking-widest mb-1.5" style={{ color: INK.faint }}>Site activity summary — W{weekB.n} ({weekB.date})</div>
+            <p className="font-body text-xs leading-relaxed" style={{ color: INK.text }}>
+              {weekB.note || generateActivityNarrative(site, weekB)}
+            </p>
           </div>
 
           <div className="font-display text-sm font-semibold mb-3" style={{ color: INK.text }}>
@@ -1273,6 +1532,9 @@ function PrintableReport({ site, weekA, weekB, weeks }) {
                 <div className="font-mono text-[8.5px] mt-0.5" style={{ color: INK.muted }}>
                   {c.trades.length ? c.trades.join(", ") : "No trades logged"}
                 </div>
+                {c.note && (
+                  <div className="font-body text-[8.5px] mt-1 leading-snug" style={{ color: INK.muted }}>{c.note}</div>
+                )}
               </div>
             ))}
           </div>
@@ -1357,10 +1619,11 @@ function ClientPortal({ site, mode, onExitPreview, initialTab = "interactive" })
       {/* client header */}
       <header className="no-print px-5 md:px-10 pt-8 pb-6" style={{ borderBottom: `1px solid ${C.line}` }}>
         <div className="max-w-4xl mx-auto">
-          <div className="flex items-center gap-2 mb-6">
+          <div className="flex items-center gap-2 mb-6 flex-wrap">
             <Logo size={30} />
             <span className="font-display text-sm font-semibold" style={{ color: C.text }}>Wisconsin Aerial</span>
-            <span className="font-mono text-[9px] tracking-widest ml-1" style={{ color: C.faint }}>CLIENT REPORT</span>
+            <span className="font-mono text-[9px] tracking-widest ml-1" style={{ color: C.faint }}>CLIENT DASHBOARD</span>
+            <span className="font-mono text-[9px] tracking-widest" style={{ color: C.cyan }}>· PRECISION WEEK-OVER-WEEK DOCUMENTATION</span>
           </div>
           <div className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-widest mb-2" style={{ color: C.faint }}>
             Prepared for {site.client}
@@ -1417,9 +1680,33 @@ function ClientPortal({ site, mode, onExitPreview, initialTab = "interactive" })
                 {weeks.length === 1 ? "Only one capture so far — comparisons will appear after the next flight." : "Select one more capture above to compare."}
               </div>
             ) : tab === "interactive" ? (
-              <CompareWorkspace site={site} weekA={weekA} weekB={weekB} />
+              <MediaWorkspace site={site} weekA={weekA} weekB={weekB} />
             ) : (
               <PrintableReport site={site} weekA={weekA} weekB={weekB} weeks={weeks} />
+            )}
+
+            {tab === "interactive" && (
+              <div className="mt-8">
+                <div className="flex items-center gap-2 mb-3">
+                  <ScrollText size={15} color={C.cyan} />
+                  <h2 className="font-display text-base font-semibold" style={{ color: C.text }}>Site activity log</h2>
+                </div>
+                <div className="space-y-2">
+                  {[...weeks].reverse().map((w) => (
+                    <div key={w.n} className="rounded-lg p-3" style={{ background: C.panel, border: `1px solid ${C.line}` }}>
+                      <div className="flex items-center justify-between gap-2 mb-1.5">
+                        <span className="font-mono text-xs" style={{ color: C.text }}>W{w.n} · {w.date}</span>
+                        <div className="flex flex-wrap gap-1.5 justify-end">
+                          {(w.trades || []).map((t) => <Badge key={t} tone="cyan">{t}</Badge>)}
+                        </div>
+                      </div>
+                      <p className="font-body text-xs leading-relaxed" style={{ color: w.note ? C.muted : C.faint }}>
+                        {w.note || "No activity narrative recorded for this flight."}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              </div>
             )}
           </>
         )}
@@ -1813,6 +2100,24 @@ export default function App() {
       : s)));
   };
 
+  const updateWeekNote = (siteId, weekN, note, noteMode) => {
+    setSites((prev) => prev.map((s) => (s.id === siteId
+      ? { ...s, _weeks: s._weeks.map((w) => (w.n === weekN ? { ...w, note, noteMode } : w)) }
+      : s)));
+  };
+
+  const addWeekMedia = (siteId, weekN, item) => {
+    setSites((prev) => prev.map((s) => (s.id === siteId
+      ? { ...s, _weeks: s._weeks.map((w) => (w.n === weekN ? { ...w, media: [...(w.media || []), item] } : w)) }
+      : s)));
+  };
+
+  const removeWeekMedia = (siteId, weekN, mediaId) => {
+    setSites((prev) => prev.map((s) => (s.id === siteId
+      ? { ...s, _weeks: s._weeks.map((w) => (w.n === weekN ? { ...w, media: (w.media || []).filter((m) => m.id !== mediaId) } : w)) }
+      : s)));
+  };
+
   const createProject = (data) => {
     setSites((prev) => [...prev, makeNewProject(data, prev.map((s) => s.id))]);
   };
@@ -1907,7 +2212,8 @@ export default function App() {
         {view === "dashboard" && <Dashboard sites={sites} onOpen={openSite} onGoToAdmin={() => setView("admin")} />}
         {view === "site" && activeSite && (
           <SiteDetail site={activeSite} onBack={() => setView("dashboard")} onPreviewClient={previewClient}
-            onGoToIngest={() => setView("ingest")} onUpdateTrades={updateWeekTrades} />
+            onGoToIngest={() => setView("ingest")} onUpdateTrades={updateWeekTrades}
+            onUpdateNote={updateWeekNote} onAddMedia={addWeekMedia} onRemoveMedia={removeWeekMedia} />
         )}
         {view === "ingest" && (
           <ReceivingEngine sites={sites} onIngested={handleIngested} onOpenSite={openSite}
