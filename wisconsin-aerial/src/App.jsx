@@ -193,6 +193,37 @@ function generateActivityNarrative(site, week) {
   return `${opener} ${activity}. ${closer}`;
 }
 
+// Same local-template approach as generateActivityNarrative, applied to a real-estate
+// listing instead of a construction flight: fabricates plausible, editable example
+// language for lot features / water-trail proximity / surrounding land use from the
+// aerial imagery. It is explicitly a draft — there is no parcel data source behind it,
+// so every output says so and needs a human to verify before it goes on MLS.
+function generateMlsDescription(site) {
+  const rng = mulberry32(hashStr(site.id + "-mls"));
+  const pick = (arr) => arr[Math.floor(rng() * arr.length)];
+
+  const lotFeature = pick([
+    "a level, cleared building pad", "mature tree cover along the perimeter",
+    "gently sloped topography with natural drainage", "an open, sun-exposed lot",
+    "a partially wooded parcel with a cleared homesite", "a corner lot with generous frontage",
+  ]);
+  const proximity = pick([
+    "within walking distance of a nearby trail system", "a short drive from the closest public water access",
+    "near a local greenway or trail corridor", "close to a nearby pond or wetland buffer",
+    "convenient to nearby recreational water access", "a few minutes from a shoreline park",
+  ]);
+  const surrounding = pick([
+    "surrounded by established low-density residential development", "adjacent to open agricultural land",
+    "bordered by a mix of residential and light commercial use", "set within a quiet, mostly residential corridor",
+    "near a growing mixed-use corridor", "backing to a wooded, undeveloped buffer",
+  ]);
+
+  return `This ${(site.type || "property").toLowerCase()} at ${site.address || site.name} offers ${lotFeature}. `
+    + `The aerial survey shows the parcel is ${proximity}, with the surrounding area ${surrounding}. `
+    + `The aerial perspective highlights the lot's layout and context for prospective buyers. `
+    + `Draft only — confirm all boundary, access, and proximity details before publishing to MLS.`;
+}
+
 function hydrateSite(raw) {
   return { ...raw, icon: resolveIcon(raw.iconKey) };
 }
@@ -236,7 +267,7 @@ function persistSession(session) {
   } catch {}
 }
 
-function makeNewProject({ name, address, client, type, iconKey, lat, lon }, existingIds) {
+function makeNewProject({ name, address, client, type, iconKey, lat, lon, mode }, existingIds) {
   const id = uniqueId(slugify(name), existingIds);
   return {
     id,
@@ -248,9 +279,11 @@ function makeNewProject({ name, address, client, type, iconKey, lat, lon }, exis
     lon: Number(lon) || 0,
     iconKey,
     icon: resolveIcon(iconKey),
+    mode: mode === "realEstate" ? "realEstate" : "construction",
     accessCode: defaultAccessCode(id),
     clientAccessEnabled: true,
     _weeks: [],
+    listing: { photos: [], capturedDate: null, description: "", descriptionMode: "manual" },
   };
 }
 
@@ -440,10 +473,43 @@ function SliderCompare({ before, after, labelBefore, labelAfter }) {
 /* ------------------------------------------------------------------ */
 /*  Compare workspace (slider / side-by-side / highlight)               */
 /* ------------------------------------------------------------------ */
-function CompareWorkspace({ site, weekA, weekB }) {
-  const [imgA, setImgA] = useState(null);
-  const [imgB, setImgB] = useState(null);
-  const [diff, setDiff] = useState(null);
+// Auto-matches each photo in weekA to its most visually similar counterpart in weekB
+// (nearest-neighbor on real pixel-difference distance, greedy — no ML feature matching,
+// just the same diffCanvases metric already used for the change-detection %), so a
+// multi-photo flight gets compared vantage-point to vantage-point rather than
+// arbitrarily first-photo to first-photo.
+async function matchWeekPhotoPairs(weekA, weekB) {
+  const photosA = weekA.photos && weekA.photos.length ? weekA.photos : [{ id: "a0", dataUrl: weekA.dataUrl }];
+  const photosB = weekB.photos && weekB.photos.length ? weekB.photos : [{ id: "b0", dataUrl: weekB.dataUrl }];
+  const [canvasesA, canvasesB] = await Promise.all([
+    Promise.all(photosA.map((p) => loadImageToCanvas(p.dataUrl))),
+    Promise.all(photosB.map((p) => loadImageToCanvas(p.dataUrl))),
+  ]);
+  const usedB = new Set();
+  const pairs = [];
+  for (let i = 0; i < canvasesA.length; i++) {
+    let bestIndex = -1, bestDiff = null;
+    for (let j = 0; j < canvasesB.length; j++) {
+      if (usedB.has(j)) continue;
+      const d = diffCanvases(canvasesA[i], canvasesB[j]);
+      if (!bestDiff || d.percent < bestDiff.percent) { bestDiff = d; bestIndex = j; }
+    }
+    if (bestIndex !== -1) {
+      usedB.add(bestIndex);
+      pairs.push({
+        aUrl: canvasesA[i].toDataURL(),
+        bUrl: canvasesB[bestIndex].toDataURL(),
+        percent: bestDiff.percent,
+        maskUrl: bestDiff.maskUrl,
+      });
+    }
+  }
+  return pairs;
+}
+
+function CompareWorkspace({ weekA, weekB }) {
+  const [pairs, setPairs] = useState([]);
+  const [pairIndex, setPairIndex] = useState(0);
   const [mode, setMode] = useState("slider");
   const [opacity, setOpacity] = useState(85);
   const [loading, setLoading] = useState(true);
@@ -452,30 +518,44 @@ function CompareWorkspace({ site, weekA, weekB }) {
     let cancelled = false;
     setLoading(true);
     (async () => {
-      const [ca, cb] = await Promise.all([sceneCanvas(weekA), sceneCanvas(weekB)]);
+      const matched = await matchWeekPhotoPairs(weekA, weekB);
       if (cancelled) return;
-      setImgA(ca.toDataURL());
-      setImgB(cb.toDataURL());
-      setDiff(diffCanvases(ca, cb));
+      setPairs(matched);
+      setPairIndex(0);
       setLoading(false);
     })();
     return () => { cancelled = true; };
-  }, [site, weekA, weekB]);
+  }, [weekA, weekB]);
 
-  if (loading || !imgA || !imgB) {
+  if (loading || !pairs.length) {
     return (
       <div className="rounded-xl flex items-center justify-center gap-2 font-mono text-xs"
         style={{ background: C.panel, border: `1px solid ${C.line}`, aspectRatio: `${W}/${H}`, color: C.muted }}>
-        <Loader2 size={14} className="animate-spin" /> Rendering comparison…
+        <Loader2 size={14} className="animate-spin" /> Matching captures…
       </div>
     );
   }
 
+  const current = pairs[Math.min(pairIndex, pairs.length - 1)];
   const labelA = `W${weekA.n} · ${weekA.date}`;
   const labelB = `W${weekB.n} · ${weekB.date}`;
 
   return (
     <div className="fade-in-up rounded-xl p-4" style={{ background: C.panel, border: `1px solid ${C.line}` }}>
+      {pairs.length > 1 && (
+        <div className="flex items-center gap-2 mb-4 overflow-x-auto pb-1">
+          <span className="font-mono text-[10px] uppercase tracking-widest shrink-0" style={{ color: C.faint }}>
+            Vantage point
+          </span>
+          {pairs.map((p, i) => (
+            <button key={i} onClick={() => setPairIndex(i)} className="btn-modern shrink-0 rounded-md overflow-hidden"
+              style={{ border: i === pairIndex ? `2px solid ${C.cyan}` : `1px solid ${C.line}` }}>
+              <img src={p.bUrl} className="w-14 h-9 object-cover block" />
+            </button>
+          ))}
+        </div>
+      )}
+
       <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
         <div className="flex items-center gap-2">
           {[
@@ -496,23 +576,23 @@ function CompareWorkspace({ site, weekA, weekB }) {
         </div>
         <div className="flex items-center gap-2 font-mono text-[11px]" style={{ color: C.muted }}>
           <TrendingUp size={13} color={C.orange} />
-          <span style={{ color: C.orange, fontWeight: 600 }}>{diff.percent.toFixed(1)}%</span>
+          <span style={{ color: C.orange, fontWeight: 600 }}>{current.percent.toFixed(1)}%</span>
           surface area changed
         </div>
       </div>
 
       {mode === "slider" && (
-        <SliderCompare before={imgA} after={imgB} labelBefore={labelA} labelAfter={labelB} />
+        <SliderCompare before={current.aUrl} after={current.bUrl} labelBefore={labelA} labelAfter={labelB} />
       )}
 
       {mode === "side" && (
         <div className="grid grid-cols-2 gap-3">
           <div>
-            <img src={imgA} className="w-full rounded-lg" style={{ border: `1px solid ${C.line}` }} />
+            <img src={current.aUrl} className="w-full rounded-lg" style={{ border: `1px solid ${C.line}` }} />
             <div className="mt-2"><Badge>{labelA}</Badge></div>
           </div>
           <div>
-            <img src={imgB} className="w-full rounded-lg" style={{ border: `1px solid ${C.line}` }} />
+            <img src={current.bUrl} className="w-full rounded-lg" style={{ border: `1px solid ${C.line}` }} />
             <div className="mt-2"><Badge tone="cyan">{labelB}</Badge></div>
           </div>
         </div>
@@ -521,8 +601,8 @@ function CompareWorkspace({ site, weekA, weekB }) {
       {mode === "highlight" && (
         <div>
           <div className="relative w-full rounded-lg overflow-hidden" style={{ border: `1px solid ${C.line}` }}>
-            <img src={imgB} className="w-full block" />
-            <img src={diff.maskUrl} className="absolute inset-0 w-full h-full" style={{ opacity: opacity / 100 }} />
+            <img src={current.bUrl} className="w-full block" />
+            <img src={current.maskUrl} className="absolute inset-0 w-full h-full" style={{ opacity: opacity / 100 }} />
             <div className="absolute top-2 right-2"><Badge tone="overlayOrange">Changed area</Badge></div>
           </div>
           <div className="flex items-center gap-3 mt-3">
@@ -596,7 +676,7 @@ function MediaWorkspace({ site, weekA, weekB }) {
         ))}
       </div>
       {tab === "still"
-        ? <CompareWorkspace site={site} weekA={weekA} weekB={weekB} />
+        ? <CompareWorkspace weekA={weekA} weekB={weekB} />
         : <MediaTypeGallery type={tab} weekA={weekA} weekB={weekB} />}
     </div>
   );
@@ -606,14 +686,16 @@ function MediaWorkspace({ site, weekA, weekB }) {
 /*  Dashboard                                                            */
 /* ------------------------------------------------------------------ */
 function SiteCard({ site, onOpen, index = 0 }) {
+  const isRealEstate = site.mode === "realEstate";
   const [thumb, setThumb] = useState(null);
   const [pct, setPct] = useState(null);
   const weeks = site._weeks;
   const last = weeks[weeks.length - 1];
   const prev = weeks[weeks.length - 2];
+  const listingPhoto = site.listing?.photos?.[0];
 
   useEffect(() => {
-    if (!last) return;
+    if (isRealEstate || !last) return;
     setThumb(null);
     setPct(null);
     (async () => {
@@ -627,21 +709,30 @@ function SiteCard({ site, onOpen, index = 0 }) {
   }, [site]);
 
   const Icon = site.icon;
+  const hasImage = isRealEstate ? !!listingPhoto : !!last;
   return (
     <button onClick={() => onOpen(site.id)}
       className="card-lift fade-in-up text-left rounded-2xl overflow-hidden"
       style={{ background: C.panel, border: `1px solid ${C.line}`, animationDelay: `${index * 70}ms` }}>
       <div className="relative" style={{ aspectRatio: `${W}/${H}`, background: C.panel2 }}>
-        {!last ? (
+        {!hasImage ? (
           <div className="w-full h-full flex flex-col items-center justify-center gap-1.5">
             <Satellite size={18} color={C.faint} />
-            <span className="font-mono text-[10px]" style={{ color: C.faint }}>No captures yet</span>
+            <span className="font-mono text-[10px]" style={{ color: C.faint }}>{isRealEstate ? "No photos yet" : "No captures yet"}</span>
           </div>
+        ) : isRealEstate ? (
+          <img src={listingPhoto.dataUrl} className="w-full h-full object-cover" />
         ) : thumb ? <img src={thumb} className="w-full h-full object-cover" /> :
           <div className="w-full h-full flex items-center justify-center"><Loader2 size={16} className="animate-spin" color={C.faint} /></div>}
-        {last && <div className="absolute top-2 left-2"><Badge tone="overlayCyan">W{last.n} · {last.date}</Badge></div>}
-        {pct !== null && (
-          <div className="absolute top-2 right-2"><Badge tone={pct > 4 ? "overlayOrange" : "overlayMuted"}>{pct.toFixed(1)}% Δ this week</Badge></div>
+        {isRealEstate ? (
+          hasImage && <div className="absolute top-2 left-2"><Badge tone="overlayCyan">Listing</Badge></div>
+        ) : (
+          <>
+            {last && <div className="absolute top-2 left-2"><Badge tone="overlayCyan">W{last.n} · {last.date}</Badge></div>}
+            {pct !== null && (
+              <div className="absolute top-2 right-2"><Badge tone={pct > 4 ? "overlayOrange" : "overlayMuted"}>{pct.toFixed(1)}% Δ this week</Badge></div>
+            )}
+          </>
         )}
       </div>
       <div className="p-3.5">
@@ -883,7 +974,106 @@ function WeekMediaRow({ week, onAddMedia, onRemoveMedia }) {
   );
 }
 
-function SiteDetail({ site, onBack, onPreviewClient, onGoToIngest, onUpdateTrades, onUpdateNote, onAddMedia, onRemoveMedia }) {
+function RealEstateBody({ site, onGoToIngest, onUpdateDescription }) {
+  const listing = site.listing || { photos: [], capturedDate: null, description: "", descriptionMode: "manual" };
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(listing.description);
+  const [draftMode, setDraftMode] = useState(listing.descriptionMode || "manual");
+
+  const startEditing = () => { setDraft(listing.description); setDraftMode(listing.descriptionMode || "manual"); setEditing(true); };
+  const generate = () => { setDraft(generateMlsDescription(site)); setDraftMode("ai"); };
+  const save = () => { onUpdateDescription(site.id, draft, draftMode); setEditing(false); };
+
+  return (
+    <div>
+      {!listing.photos.length ? (
+        <div className="rounded-xl p-8 text-center font-body text-sm flex flex-col items-center gap-3" style={{ background: C.panel, border: `1px solid ${C.line}`, color: C.muted }}>
+          <Satellite size={20} color={C.faint} />
+          <span>No aerial photos uploaded yet for this listing.</span>
+          <button onClick={onGoToIngest}
+            className="btn-modern flex items-center gap-1.5 px-3.5 py-2 rounded-lg font-body text-xs font-medium"
+            style={{ background: C.cyan, color: "#FFFFFF" }}>
+            <FolderInput size={13} /> Add aerial photos
+          </button>
+        </div>
+      ) : (
+        <>
+          <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+            <h2 className="font-display text-base font-semibold" style={{ color: C.text }}>Aerial photos</h2>
+            <span className="font-mono text-[10px]" style={{ color: C.faint }}>Captured {listing.capturedDate}</span>
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 mb-4">
+            {listing.photos.map((p) => (
+              <img key={p.id} src={p.dataUrl} className="w-full rounded-lg object-cover" style={{ border: `1px solid ${C.line}`, aspectRatio: `${W}/${H}` }} />
+            ))}
+          </div>
+          <button onClick={onGoToIngest}
+            className="btn-modern mb-6 flex items-center gap-1.5 px-3.5 py-2 rounded-lg font-body text-xs font-medium"
+            style={{ background: C.panel2, color: C.cyan, border: `1px solid ${C.line}` }}>
+            <FolderInput size={13} /> Replace with new photos
+          </button>
+        </>
+      )}
+
+      <div className="mt-2">
+        <div className="flex items-center gap-2 mb-1">
+          <ScrollText size={15} color={C.cyan} />
+          <h2 className="font-display text-base font-semibold" style={{ color: C.text }}>MLS description draft</h2>
+        </div>
+        <p className="font-body text-xs mb-3" style={{ color: C.muted }}>
+          Draft lot features, water/trail proximity, and surrounding land use from the aerial imagery — write it yourself or generate a starting draft.
+        </p>
+        <div className="rounded-lg p-3" style={{ background: C.panel, border: `1px solid ${C.line}` }}>
+          <div className="flex items-center justify-between gap-2">
+            <span className="font-mono text-xs" style={{ color: C.text }}>Listing description</span>
+            <div className="flex items-center gap-2">
+              {listing.description && !editing && (
+                <Badge tone={listing.descriptionMode === "ai" ? "cyan" : "muted"}>
+                  {listing.descriptionMode === "ai" ? "AI draft" : "Manual"}
+                </Badge>
+              )}
+              {!editing && (
+                <button onClick={startEditing} className="font-mono text-[10px] uppercase tracking-widest" style={{ color: C.cyan }}>
+                  {listing.description ? "Edit" : "Add description"}
+                </button>
+              )}
+            </div>
+          </div>
+          {editing ? (
+            <div className="mt-2 space-y-2">
+              <textarea value={draft} onChange={(e) => { setDraft(e.target.value); setDraftMode("manual"); }} rows={5}
+                placeholder="Describe the lot, proximity to water/trails, and surrounding land use…"
+                className="w-full rounded-lg px-3 py-2 font-body text-xs outline-none resize-none" style={inputStyle} />
+              <div className="flex items-center gap-2 flex-wrap">
+                <button type="button" onClick={generate}
+                  className="btn-modern flex items-center gap-1.5 px-3 py-1.5 rounded-md font-mono text-[10px]"
+                  style={{ background: C.panel2, color: C.cyan, border: `1px solid ${C.line}` }}>
+                  <Sparkles size={12} /> Generate draft
+                </button>
+                <button type="button" onClick={save}
+                  className="btn-modern px-3 py-1.5 rounded-md font-mono text-[10px] font-medium" style={{ background: C.cyan, color: C.onAccent }}>
+                  Save
+                </button>
+                <button type="button" onClick={() => setEditing(false)} className="font-mono text-[10px]" style={{ color: C.faint }}>
+                  Cancel
+                </button>
+              </div>
+            </div>
+          ) : (
+            <p className="font-body text-xs mt-2 leading-relaxed" style={{ color: listing.description ? C.muted : C.faint }}>
+              {listing.description || "No description drafted yet."}
+            </p>
+          )}
+        </div>
+        <p className="font-mono text-[9.5px] mt-2" style={{ color: C.faint }}>
+          Draft only — verify all lot, access, and proximity details before publishing to MLS.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function SiteDetail({ site, onBack, onPreviewClient, onGoToIngest, onUpdateTrades, onUpdateNote, onAddMedia, onRemoveMedia, onUpdateListingDescription }) {
   const weeks = site._weeks;
   const [selected, setSelected] = useState(() =>
     weeks.length >= 2 ? [weeks[weeks.length - 2].n, weeks[weeks.length - 1].n] : weeks.length === 1 ? [weeks[0].n] : []
@@ -930,7 +1120,9 @@ function SiteDetail({ site, onBack, onPreviewClient, onGoToIngest, onUpdateTrade
         <MapPin size={12} /> {site.address}
       </div>
 
-      {weeks.length === 0 ? (
+      {site.mode === "realEstate" ? (
+        <RealEstateBody site={site} onGoToIngest={onGoToIngest} onUpdateDescription={onUpdateListingDescription} />
+      ) : weeks.length === 0 ? (
         <div className="rounded-xl p-8 text-center font-body text-sm flex flex-col items-center gap-3" style={{ background: C.panel, border: `1px solid ${C.line}`, color: C.muted }}>
           <Satellite size={20} color={C.faint} />
           <span>No flights logged yet for this project.</span>
@@ -1007,7 +1199,7 @@ function SiteDetail({ site, onBack, onPreviewClient, onGoToIngest, onUpdateTrade
 /* ------------------------------------------------------------------ */
 /*  Receiving engine — batch ingest from DJI Air 3S                     */
 /* ------------------------------------------------------------------ */
-const PIPELINE_STEPS = [
+const PIPELINE_STEPS_CONSTRUCTION = [
   { label: "Receiving imagery from DJI Air 3S", icon: Satellite },
   { label: "Extracting GPS + EXIF flight metadata", icon: Compass },
   { label: "Matching flight path to project boundary", icon: MapPin },
@@ -1016,23 +1208,109 @@ const PIPELINE_STEPS = [
   { label: "Running change-detection analysis", icon: TrendingUp },
 ];
 
-const TRADE_OPTIONS = [
-  "Excavation", "Concrete", "Framing", "Roofing", "Electrical",
-  "Plumbing", "HVAC", "Drywall", "Painting", "Landscaping",
+const PIPELINE_STEPS_REAL_ESTATE = [
+  { label: "Receiving imagery from DJI Air 3S", icon: Satellite },
+  { label: "Extracting GPS + EXIF flight metadata", icon: Compass },
+  { label: "Matching flight path to parcel boundary", icon: MapPin },
+  { label: "Stitching orthomosaic composite", icon: Layers },
+  { label: "Analyzing lot features and surroundings", icon: TreePine },
+  { label: "Drafting MLS description", icon: ScrollText },
+];
+
+const TRADE_CATEGORIES = [
+  {
+    category: "Sitework and earthwork",
+    trades: [
+      "Surveying / layout", "Demolition", "Clearing and grubbing", "Excavation and grading",
+      "Erosion control", "Site utilities (storm, sanitary, water)", "Dewatering",
+      "Paving (asphalt and concrete)", "Landscaping and irrigation", "Fencing",
+    ],
+  },
+  {
+    category: "Foundations and structure",
+    trades: [
+      "Deep foundations (piles, caissons, piers)", "Shoring", "Concrete formwork",
+      "Rebar / reinforcing steel", "Concrete placement and finishing", "Precast concrete",
+      "Structural steel erection", "Miscellaneous metals (stairs, railings, embeds)",
+      "Masonry", "Carpentry / wood framing", "Crane and rigging",
+    ],
+  },
+  {
+    category: "Building envelope",
+    trades: [
+      "Roofing", "Waterproofing and damp-proofing", "Insulation", "Air and vapor barriers",
+      "Exterior cladding / siding / metal panels", "Curtain wall and storefront glazing",
+      "Windows and doors", "Sheet metal and flashing", "Caulking and sealants",
+    ],
+  },
+  {
+    category: "MEP (mechanical, electrical, plumbing)",
+    trades: [
+      "Plumbing", "HVAC / mechanical", "Sheet metal ductwork", "Pipefitting",
+      "Fire protection / sprinklers", "Electrical", "Low-voltage (data, telecom, AV)",
+      "Fire alarm", "Security and access control", "Controls / building automation",
+      "Test and balance (TAB)",
+    ],
+  },
+  {
+    category: "Interiors and finishes",
+    trades: [
+      "Metal stud framing", "Drywall and taping", "Acoustical ceilings",
+      "Painting and wall coverings", "Flooring (tile, carpet, resilient, epoxy)",
+      "Millwork and casework", "Doors, frames, and hardware",
+      "Specialties (toilet partitions, signage, lockers)", "Elevators and conveying systems",
+    ],
+  },
+  {
+    category: "Specialty and industrial",
+    trades: [
+      "Process piping", "Cleanroom construction", "Welding", "Insulation (mechanical/pipe)",
+      "Commissioning", "Equipment setting / millwrights", "Scaffolding",
+      "Fireproofing and firestopping",
+    ],
+  },
+  {
+    category: "Site support",
+    trades: [
+      "General labor and cleanup", "Traffic control / flagging",
+      "Temporary facilities (power, trailers, toilets)", "Material hauling and trucking", "Safety",
+    ],
+  },
 ];
 
 function TradesEditor({ trades, onChange }) {
+  const [filter, setFilter] = useState("");
   const toggle = (t) => {
     onChange(trades.includes(t) ? trades.filter((x) => x !== t) : [...trades, t]);
   };
+  const q = filter.trim().toLowerCase();
+  const visible = q
+    ? TRADE_CATEGORIES.map((c) => ({ ...c, trades: c.trades.filter((t) => t.toLowerCase().includes(q)) })).filter((c) => c.trades.length)
+    : TRADE_CATEGORIES;
+
   return (
-    <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-2">
-      {TRADE_OPTIONS.map((t) => (
-        <label key={t} className="flex items-center gap-2 cursor-pointer font-body text-xs" style={{ color: C.text }}>
-          <input type="checkbox" checked={trades.includes(t)} onChange={() => toggle(t)} className="w-4 h-4 shrink-0 accent-blue-600" />
-          {t}
-        </label>
-      ))}
+    <div>
+      <input type="text" value={filter} onChange={(e) => setFilter(e.target.value)}
+        placeholder="Filter trades…"
+        className="w-full rounded-lg px-3 py-1.5 mb-3 font-body text-xs outline-none" style={inputStyle} />
+      <div className="max-h-72 overflow-y-auto pr-1 space-y-3">
+        {visible.map((c) => (
+          <div key={c.category}>
+            <div className="font-mono text-[9px] uppercase tracking-widest mb-1.5" style={{ color: C.faint }}>{c.category}</div>
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-1.5">
+              {c.trades.map((t) => (
+                <label key={t} className="flex items-center gap-2 cursor-pointer font-body text-xs" style={{ color: C.text }}>
+                  <input type="checkbox" checked={trades.includes(t)} onChange={() => toggle(t)} className="w-4 h-4 shrink-0 accent-blue-600" />
+                  {t}
+                </label>
+              ))}
+            </div>
+          </div>
+        ))}
+        {!visible.length && (
+          <div className="font-mono text-[11px]" style={{ color: C.faint }}>No trades match "{filter}"</div>
+        )}
+      </div>
     </div>
   );
 }
@@ -1074,7 +1352,7 @@ function buildReceivedFile(file, index, seedBase) {
   };
 }
 
-function ReceivingEngine({ sites, onIngested, onOpenSite, onGoToAdmin }) {
+function ReceivingEngine({ sites, onIngested, onIngestedListing, onOpenSite, onGoToAdmin }) {
   const [received, setReceived] = useState([]); // {id,file,name,dataUrl,alt,dLat,dLon,t}
   const [dragOver, setDragOver] = useState(false);
   const [detectedId, setDetectedId] = useState(null);
@@ -1085,6 +1363,8 @@ function ReceivingEngine({ sites, onIngested, onOpenSite, onGoToAdmin }) {
   const timerRef = useRef(null);
 
   const site = sites.find((s) => s.id === (siteId || detectedId));
+  const isRealEstate = site?.mode === "realEstate";
+  const pipelineSteps = isRealEstate ? PIPELINE_STEPS_REAL_ESTATE : PIPELINE_STEPS_CONSTRUCTION;
 
   const handleFiles = (fileList) => {
     if (!sites.length) return;
@@ -1117,19 +1397,25 @@ function ReceivingEngine({ sites, onIngested, onOpenSite, onGoToAdmin }) {
     timerRef.current = setInterval(() => {
       s += 1;
       setStage(s);
-      if (s >= PIPELINE_STEPS.length) clearInterval(timerRef.current);
+      if (s >= pipelineSteps.length) clearInterval(timerRef.current);
     }, 650);
   };
 
   useEffect(() => () => clearInterval(timerRef.current), []);
 
-  const done = stage >= PIPELINE_STEPS.length;
+  const done = stage >= pipelineSteps.length;
   const hero = received[0];
 
   const finish = () => {
-    const weeks = site._weeks;
-    const nextN = weeks.length ? weeks[weeks.length - 1].n + 1 : 1;
-    onIngested(site.id, { n: nextN, date: formatShortDate(), real: true, dataUrl: hero.dataUrl, sourceCount: received.length, trades: tradesOnSite });
+    if (isRealEstate) {
+      const photos = received.map((r, i) => ({ id: `${site.id}-listing-${Date.now()}-${i}`, dataUrl: r.dataUrl }));
+      onIngestedListing(site.id, { photos, capturedDate: formatShortDate() });
+    } else {
+      const weeks = site._weeks;
+      const nextN = weeks.length ? weeks[weeks.length - 1].n + 1 : 1;
+      const photos = received.map((r, i) => ({ id: `${site.id}-w${nextN}-${i}`, dataUrl: r.dataUrl }));
+      onIngested(site.id, { n: nextN, date: formatShortDate(), real: true, dataUrl: hero.dataUrl, sourceCount: received.length, trades: tradesOnSite, photos });
+    }
     onOpenSite(site.id);
   };
 
@@ -1235,7 +1521,7 @@ function ReceivingEngine({ sites, onIngested, onOpenSite, onGoToAdmin }) {
           {stage >= 0 && (
             <div className="fade-in-up rounded-xl p-5" style={{ background: C.panel, border: `1px solid ${C.line}` }}>
               <div className="space-y-3">
-                {PIPELINE_STEPS.map((step, i) => {
+                {pipelineSteps.map((step, i) => {
                   const isDone = i < stage, isActive = i === stage && !done;
                   const Icon = step.icon;
                   return (
@@ -1255,17 +1541,21 @@ function ReceivingEngine({ sites, onIngested, onOpenSite, onGoToAdmin }) {
                     <CheckCircle2 size={15} /> Batch processed — orthomosaic ready for review
                   </div>
                   <p className="font-mono text-[11px] mb-4" style={{ color: C.faint }}>
-                    The aligner registers every frame in this batch against the site's prior capture before diffing.
+                    {isRealEstate
+                      ? "These photos become this listing's current aerial set, replacing any prior upload."
+                      : "The aligner registers every frame in this batch against the site's prior capture before diffing."}
                   </p>
-                  <div className="rounded-lg p-4 mb-4" style={{ background: C.panel2, border: `1px solid ${C.line}` }}>
-                    <div className="font-mono text-[10px] uppercase tracking-widest mb-3" style={{ color: C.faint }}>
-                      Trades on site this flight
+                  {!isRealEstate && (
+                    <div className="rounded-lg p-4 mb-4" style={{ background: C.panel2, border: `1px solid ${C.line}` }}>
+                      <div className="font-mono text-[10px] uppercase tracking-widest mb-3" style={{ color: C.faint }}>
+                        Trades on site this flight
+                      </div>
+                      <TradesEditor trades={tradesOnSite} onChange={setTradesOnSite} />
                     </div>
-                    <TradesEditor trades={tradesOnSite} onChange={setTradesOnSite} />
-                  </div>
+                  )}
                   <button onClick={finish} className="btn-modern w-full py-2.5 rounded-lg font-body text-sm font-medium"
                     style={{ background: C.cyan, color: C.onAccent }}>
-                    Add to flight log &amp; compare
+                    {isRealEstate ? "Save aerial photos" : "Add to flight log & compare"}
                   </button>
                 </div>
               )}
@@ -1566,6 +1856,81 @@ function ClientStat({ icon: Icon, label, value, tone = "muted" }) {
   );
 }
 
+function RealEstateReport({ site }) {
+  const listing = site.listing || { photos: [], capturedDate: null, description: "" };
+  const today = new Date().toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" });
+
+  return (
+    <div>
+      <div className="no-print flex items-center justify-between mb-4 flex-wrap gap-3">
+        <p className="font-mono text-[11px]" style={{ color: C.faint }}>
+          This is exactly how the PDF will lay out. "Download PDF" opens your browser's print dialog — choose
+          "Save as PDF" as the destination.
+        </p>
+        <button onClick={() => window.print()}
+          className="btn-modern flex items-center gap-2 px-4 py-2.5 rounded-lg font-body text-sm font-medium shrink-0"
+          style={{ background: C.cyan, color: C.onAccent, boxShadow: "0 8px 24px -8px rgba(28,100,214,0.4)" }}>
+          <Download size={15} /> Download PDF
+        </button>
+      </div>
+
+      <div id="printable-report" className="rounded-xl overflow-hidden" style={{ background: "#FFFFFF" }}>
+        <div className="p-8 md:p-10">
+          <div className="flex items-center justify-between mb-8">
+            <div className="flex items-center gap-2">
+              <Logo size={26} />
+              <span className="font-display text-sm font-semibold" style={{ color: INK.text }}>Wisconsin Aerial</span>
+            </div>
+            <div className="text-right">
+              <div className="font-mono text-[9px] tracking-widest" style={{ color: INK.faint }}>AERIAL LISTING PACKAGE</div>
+              <div className="font-mono text-[8px] tracking-widest mt-0.5" style={{ color: C.cyan }}>DRAFT — VERIFY BEFORE PUBLISHING</div>
+            </div>
+          </div>
+
+          <div className="pb-6 mb-6" style={{ borderBottom: `1px solid ${INK.line}` }}>
+            <div className="font-mono text-[10px] uppercase tracking-widest mb-2" style={{ color: INK.faint }}>
+              Prepared for {site.client}
+            </div>
+            <h1 className="font-display text-2xl font-semibold mb-1" style={{ color: INK.text }}>{site.name}</h1>
+            <div className="font-mono text-xs" style={{ color: INK.muted }}>{site.address}</div>
+            <div className="font-mono text-[10px] mt-2" style={{ color: INK.faint }}>
+              Report generated {today}{listing.capturedDate ? ` · Aerial capture ${listing.capturedDate}` : ""}
+            </div>
+          </div>
+
+          <div className="font-display text-sm font-semibold mb-3" style={{ color: INK.text }}>Aerial photos</div>
+          {listing.photos.length ? (
+            <div className="grid grid-cols-3 gap-3 mb-8">
+              {listing.photos.map((p) => (
+                <img key={p.id} src={p.dataUrl} className="w-full rounded-lg" style={{ border: `1px solid ${INK.line}`, aspectRatio: `${W}/${H}`, objectFit: "cover" }} />
+              ))}
+            </div>
+          ) : (
+            <div className="rounded-lg p-6 mb-8 text-center font-mono text-xs" style={{ background: INK.panel, color: INK.faint, border: `1px solid ${INK.line}` }}>
+              No aerial photos uploaded yet.
+            </div>
+          )}
+
+          <div className="font-display text-sm font-semibold mb-3" style={{ color: INK.text }}>Listing description</div>
+          <p className="font-body text-sm leading-relaxed mb-2" style={{ color: INK.text }}>
+            {listing.description || "No description drafted yet."}
+          </p>
+          <p className="font-mono text-[9.5px] mb-8" style={{ color: INK.faint }}>
+            Draft only — verify all lot, access, and proximity details before publishing to MLS.
+          </p>
+
+          <div className="pt-5 flex items-center justify-between flex-wrap gap-2" style={{ borderTop: `1px solid ${INK.line}` }}>
+            <span className="font-mono text-[9.5px]" style={{ color: INK.faint }}>
+              Flown &amp; processed by Wisconsin Aerial · imagery captured via DJI Air 3S
+            </span>
+            <span className="font-mono text-[9.5px]" style={{ color: INK.faint }}>Aerial reference only, not a survey or appraisal</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function ClientPortal({ site, mode, onExitPreview, initialTab = "interactive" }) {
   const weeks = site._weeks;
   const [selected, setSelected] = useState(() =>
@@ -1639,6 +2004,54 @@ function ClientPortal({ site, mode, onExitPreview, initialTab = "interactive" })
       </header>
 
       <main className="px-5 md:px-10 py-8 max-w-4xl mx-auto">
+        {site.mode === "realEstate" ? (
+          <>
+            <div className="no-print grid grid-cols-2 md:grid-cols-3 gap-3 mb-8">
+              <ClientStat icon={ImageIcon} label="Aerial photos" value={(site.listing?.photos || []).length} />
+              <ClientStat icon={Clock} label="Captured" value={site.listing?.capturedDate || "—"} />
+              <ClientStat icon={Building2} label="Property type" value={site.type || "—"} />
+            </div>
+
+            <div className="no-print flex items-center gap-2 mb-5 rounded-lg p-1 w-fit" style={{ background: C.panel2, border: `1px solid ${C.line}` }}>
+              {[
+                { id: "interactive", label: "Listing overview", icon: ImageIcon },
+                { id: "pdf", label: "PDF report", icon: FileText },
+              ].map((t) => (
+                <button key={t.id} onClick={() => setTab(t.id)}
+                  className="btn-modern flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-body"
+                  style={{ background: tab === t.id ? C.cyan : "transparent", color: tab === t.id ? "#FFFFFF" : C.muted, fontWeight: tab === t.id ? 600 : 400 }}>
+                  <t.icon size={13} /> {t.label}
+                </button>
+              ))}
+            </div>
+
+            {tab === "interactive" ? (
+              !(site.listing?.photos || []).length ? (
+                <div className="no-print rounded-xl p-10 text-center font-body text-sm flex flex-col items-center gap-2" style={{ background: C.panel, border: `1px solid ${C.line}`, color: C.muted }}>
+                  <Satellite size={20} color={C.faint} />
+                  No aerial photos uploaded yet for this listing — check back soon.
+                </div>
+              ) : (
+                <div>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 mb-6">
+                    {site.listing.photos.map((p) => (
+                      <img key={p.id} src={p.dataUrl} className="w-full rounded-lg object-cover" style={{ border: `1px solid ${C.line}`, aspectRatio: `${W}/${H}` }} />
+                    ))}
+                  </div>
+                  <div className="rounded-xl p-4" style={{ background: C.panel, border: `1px solid ${C.line}` }}>
+                    <h3 className="font-display text-sm font-semibold mb-2" style={{ color: C.text }}>Listing description</h3>
+                    <p className="font-body text-sm leading-relaxed" style={{ color: C.muted }}>
+                      {site.listing?.description || "No description drafted yet."}
+                    </p>
+                  </div>
+                </div>
+              )
+            ) : (
+              <RealEstateReport site={site} />
+            )}
+          </>
+        ) : (
+          <>
         <div className="no-print grid grid-cols-2 md:grid-cols-4 gap-3 mb-8">
           <ClientStat icon={Plane} label="Total flights" value={weeks.length} />
           <ClientStat icon={Clock} label="Tracking since" value={first?.date ?? "—"} />
@@ -1710,12 +2123,16 @@ function ClientPortal({ site, mode, onExitPreview, initialTab = "interactive" })
             )}
           </>
         )}
+          </>
+        )}
 
         <footer className="no-print mt-12 pt-6 flex items-center justify-between flex-wrap gap-2" style={{ borderTop: `1px solid ${C.line}` }}>
           <span className="font-mono text-[10px]" style={{ color: C.faint }}>
             Flown &amp; processed by Wisconsin Aerial · questions go to your project pilot
           </span>
-          <span className="font-mono text-[10px]" style={{ color: C.faint }}>Report generated {last?.date ?? "—"}</span>
+          <span className="font-mono text-[10px]" style={{ color: C.faint }}>
+            Report generated {site.mode === "realEstate" ? (site.listing?.capturedDate ?? "—") : (last?.date ?? "—")}
+          </span>
         </footer>
       </main>
     </div>
@@ -1867,6 +2284,7 @@ function FormField({ label, children }) {
 const inputStyle = { background: C.panel2, color: C.text, border: `1px solid ${C.line}` };
 
 function ProjectForm({ mode, initial, onCancel, onSave, onDelete }) {
+  const [projectMode, setProjectMode] = useState(initial?.mode === "realEstate" ? "realEstate" : "construction");
   const [name, setName] = useState(initial?.name || "");
   const [client, setClient] = useState(initial?.client || "");
   const [address, setAddress] = useState(initial?.address || "");
@@ -1898,6 +2316,7 @@ function ProjectForm({ mode, initial, onCancel, onSave, onDelete }) {
       iconKey,
       lat: lat === "" ? 0 : Number(lat),
       lon: lon === "" ? 0 : Number(lon),
+      mode: projectMode,
       clientAccessEnabled,
       accessCode: accessCode || defaultAccessCode(initial?.id || name),
     });
@@ -1909,11 +2328,49 @@ function ProjectForm({ mode, initial, onCancel, onSave, onDelete }) {
         className="fade-in-up w-full max-w-lg rounded-2xl p-6 max-h-[90vh] overflow-y-auto"
         style={{ background: C.panel, border: `1px solid ${C.line}`, boxShadow: "0 24px 60px -20px rgba(18,24,38,0.35)" }}>
         <div className="flex items-center justify-between mb-5">
-          <h3 className="font-display text-lg font-semibold" style={{ color: C.text }}>
-            {mode === "create" ? "New project" : "Edit project"}
-          </h3>
+          <div className="flex items-center gap-2">
+            <h3 className="font-display text-lg font-semibold" style={{ color: C.text }}>
+              {mode === "create" ? "New project" : "Edit project"}
+            </h3>
+            {mode === "edit" && (
+              <Badge tone={projectMode === "realEstate" ? "cyan" : "muted"}>
+                {projectMode === "realEstate" ? "Real estate" : "Construction"}
+              </Badge>
+            )}
+          </div>
           <button type="button" onClick={onCancel}><X size={16} color={C.faint} /></button>
         </div>
+
+        {mode === "create" && (
+          <div className="mb-4">
+            <FormField label="Project mode">
+              <div className="grid grid-cols-2 gap-2">
+                <button type="button" onClick={() => setProjectMode("construction")}
+                  className="rounded-lg px-3 py-2.5 text-left"
+                  style={{
+                    background: projectMode === "construction" ? C.cyan : C.panel2,
+                    border: `1px solid ${projectMode === "construction" ? C.cyan : C.line}`,
+                  }}>
+                  <div className="font-body text-xs font-semibold" style={{ color: projectMode === "construction" ? C.onAccent : C.text }}>Construction</div>
+                  <div className="font-mono text-[9.5px] mt-0.5" style={{ color: projectMode === "construction" ? "rgba(255,255,255,0.85)" : C.faint }}>
+                    Week-over-week flight tracking &amp; progress reports
+                  </div>
+                </button>
+                <button type="button" onClick={() => setProjectMode("realEstate")}
+                  className="rounded-lg px-3 py-2.5 text-left"
+                  style={{
+                    background: projectMode === "realEstate" ? C.cyan : C.panel2,
+                    border: `1px solid ${projectMode === "realEstate" ? C.cyan : C.line}`,
+                  }}>
+                  <div className="font-body text-xs font-semibold" style={{ color: projectMode === "realEstate" ? C.onAccent : C.text }}>Real estate</div>
+                  <div className="font-mono text-[9.5px] mt-0.5" style={{ color: projectMode === "realEstate" ? "rgba(255,255,255,0.85)" : C.faint }}>
+                    Aerial listing photos &amp; a draft MLS description
+                  </div>
+                </button>
+              </div>
+            </FormField>
+          </div>
+        )}
 
         <div className="grid grid-cols-2 gap-4 mb-4">
           <div className="col-span-2">
@@ -2044,6 +2501,7 @@ function AdminControls({ sites, onCreate, onUpdate, onDelete }) {
                 </div>
               </div>
               <div className="flex items-center gap-2 shrink-0">
+                <Badge tone={s.mode === "realEstate" ? "cyan" : "muted"}>{s.mode === "realEstate" ? "Real estate" : "Construction"}</Badge>
                 <Badge tone={s.clientAccessEnabled ? "ok" : "muted"}>{s.clientAccessEnabled ? "Client access on" : "Client access off"}</Badge>
                 <span className="font-mono text-[11px] tracking-widest hidden sm:inline" style={{ color: C.faint }}>{s.accessCode}</span>
                 <button onClick={() => setEditing(s.id)} className="btn-modern p-2 rounded-lg" style={{ background: C.panel2, border: `1px solid ${C.line}` }}>
@@ -2092,6 +2550,18 @@ export default function App() {
 
   const handleIngested = (siteId, weekEntry) => {
     setSites((prev) => prev.map((s) => (s.id === siteId ? { ...s, _weeks: [...s._weeks, weekEntry] } : s)));
+  };
+
+  const handleIngestedListing = (siteId, listingUpdate) => {
+    setSites((prev) => prev.map((s) => (s.id === siteId
+      ? { ...s, listing: { ...(s.listing || {}), ...listingUpdate } }
+      : s)));
+  };
+
+  const updateListingDescription = (siteId, description, descriptionMode) => {
+    setSites((prev) => prev.map((s) => (s.id === siteId
+      ? { ...s, listing: { ...(s.listing || {}), description, descriptionMode } }
+      : s)));
   };
 
   const updateWeekTrades = (siteId, weekN, trades) => {
@@ -2213,11 +2683,12 @@ export default function App() {
         {view === "site" && activeSite && (
           <SiteDetail site={activeSite} onBack={() => setView("dashboard")} onPreviewClient={previewClient}
             onGoToIngest={() => setView("ingest")} onUpdateTrades={updateWeekTrades}
-            onUpdateNote={updateWeekNote} onAddMedia={addWeekMedia} onRemoveMedia={removeWeekMedia} />
+            onUpdateNote={updateWeekNote} onAddMedia={addWeekMedia} onRemoveMedia={removeWeekMedia}
+            onUpdateListingDescription={updateListingDescription} />
         )}
         {view === "ingest" && (
-          <ReceivingEngine sites={sites} onIngested={handleIngested} onOpenSite={openSite}
-            onGoToAdmin={() => setView("admin")} />
+          <ReceivingEngine sites={sites} onIngested={handleIngested} onIngestedListing={handleIngestedListing}
+            onOpenSite={openSite} onGoToAdmin={() => setView("admin")} />
         )}
         {view === "quick" && <QuickCompare />}
         {view === "admin" && (
