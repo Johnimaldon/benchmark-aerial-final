@@ -7,8 +7,11 @@ import {
   Images, Compass, Clock, ChevronDown, Download, FileText,
   Lock, KeyRound, Settings, Trash2, Plus, Pencil, RefreshCw, ShieldAlert,
   Factory, Warehouse, TreePine, Eye, EyeOff, AlertCircle, UserCog,
-  Sparkles, Video, Image as ImageIcon, ScrollText
+  Sparkles, Video, Image as ImageIcon, ScrollText, Mail
 } from "lucide-react";
+import { isSupabaseConfigured } from "./lib/supabaseClient";
+import * as db from "./lib/data";
+import { signInOperator, signOutOperator, getOperatorSession, onOperatorAuthChange } from "./lib/auth";
 
 /* ------------------------------------------------------------------ */
 /*  Tokens                                                              */
@@ -2145,25 +2148,53 @@ function ClientPortal({ site, mode, onExitPreview, initialTab = "interactive" })
 // Demo-grade check only: there is no backend, so this can't be a real secret.
 const ADMIN_PASSCODE = "AMDG";
 
-function AccessGate({ sites, onAdminLogin, onClientAccess }) {
+function AccessGate({ sites, supabaseMode, onAdminLogin, onClientAccess }) {
   const [mode, setMode] = useState("choose");
   const [passcode, setPasscode] = useState("");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [code, setCode] = useState("");
   const [showPass, setShowPass] = useState(false);
   const [error, setError] = useState(null);
+  const [busy, setBusy] = useState(false);
 
-  const submitAdmin = (e) => {
+  const submitAdmin = async (e) => {
     e.preventDefault();
-    if (passcode.trim() === ADMIN_PASSCODE) { onAdminLogin(); return; }
-    setError("Incorrect passcode.");
+    if (!supabaseMode) {
+      if (passcode.trim() === ADMIN_PASSCODE) { onAdminLogin(); return; }
+      setError("Incorrect passcode.");
+      return;
+    }
+    setBusy(true); setError(null);
+    try {
+      await signInOperator(email.trim(), password);
+      onAdminLogin();
+    } catch (err) {
+      setError(err.message || "Sign-in failed.");
+    } finally {
+      setBusy(false);
+    }
   };
 
-  const submitClient = (e) => {
+  const submitClient = async (e) => {
     e.preventDefault();
-    const match = sites.find((s) => s.accessCode.toLowerCase() === code.trim().toLowerCase());
-    if (!match) { setError("That access code doesn't match any project."); return; }
-    if (!match.clientAccessEnabled) { setError("Client access for this project has been disabled by the site administrator."); return; }
-    onClientAccess(match.id);
+    if (!supabaseMode) {
+      const match = sites.find((s) => s.accessCode.toLowerCase() === code.trim().toLowerCase());
+      if (!match) { setError("That access code doesn't match any project."); return; }
+      if (!match.clientAccessEnabled) { setError("Client access for this project has been disabled by the site administrator."); return; }
+      onClientAccess(match.id, match, code.trim());
+      return;
+    }
+    setBusy(true); setError(null);
+    try {
+      const match = await db.getSiteByAccessCode(code.trim());
+      if (!match) { setError("That access code doesn't match any project, or client access has been disabled."); return; }
+      onClientAccess(match.id, match, code.trim());
+    } catch (err) {
+      setError(err.message || "Couldn't look up that project.");
+    } finally {
+      setBusy(false);
+    }
   };
 
   return (
@@ -2201,25 +2232,51 @@ function AccessGate({ sites, onAdminLogin, onClientAccess }) {
 
         {mode === "admin" && (
           <form onSubmit={submitAdmin} className="space-y-3">
-            <label className="font-mono text-[10px] uppercase tracking-widest" style={{ color: C.faint }}>Admin passcode</label>
-            <div className="relative">
-              <Lock size={14} color={C.faint} className="absolute left-3 top-1/2 -translate-y-1/2" />
-              <input autoFocus type={showPass ? "text" : "password"} value={passcode}
-                onChange={(e) => { setPasscode(e.target.value); setError(null); }}
-                className="w-full rounded-lg pl-9 pr-9 py-2.5 font-body text-sm outline-none"
-                style={{ background: C.panel2, color: C.text, border: `1px solid ${C.line}` }} />
-              <button type="button" onClick={() => setShowPass((v) => !v)} className="absolute right-3 top-1/2 -translate-y-1/2">
-                {showPass ? <EyeOff size={14} color={C.faint} /> : <Eye size={14} color={C.faint} />}
-              </button>
-            </div>
+            {supabaseMode ? (
+              <>
+                <label className="font-mono text-[10px] uppercase tracking-widest" style={{ color: C.faint }}>Operator email</label>
+                <div className="relative">
+                  <Mail size={14} color={C.faint} className="absolute left-3 top-1/2 -translate-y-1/2" />
+                  <input autoFocus type="email" value={email}
+                    onChange={(e) => { setEmail(e.target.value); setError(null); }}
+                    className="w-full rounded-lg pl-9 pr-3 py-2.5 font-body text-sm outline-none"
+                    style={{ background: C.panel2, color: C.text, border: `1px solid ${C.line}` }} />
+                </div>
+                <label className="font-mono text-[10px] uppercase tracking-widest" style={{ color: C.faint }}>Password</label>
+                <div className="relative">
+                  <Lock size={14} color={C.faint} className="absolute left-3 top-1/2 -translate-y-1/2" />
+                  <input type={showPass ? "text" : "password"} value={password}
+                    onChange={(e) => { setPassword(e.target.value); setError(null); }}
+                    className="w-full rounded-lg pl-9 pr-9 py-2.5 font-body text-sm outline-none"
+                    style={{ background: C.panel2, color: C.text, border: `1px solid ${C.line}` }} />
+                  <button type="button" onClick={() => setShowPass((v) => !v)} className="absolute right-3 top-1/2 -translate-y-1/2">
+                    {showPass ? <EyeOff size={14} color={C.faint} /> : <Eye size={14} color={C.faint} />}
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                <label className="font-mono text-[10px] uppercase tracking-widest" style={{ color: C.faint }}>Admin passcode</label>
+                <div className="relative">
+                  <Lock size={14} color={C.faint} className="absolute left-3 top-1/2 -translate-y-1/2" />
+                  <input autoFocus type={showPass ? "text" : "password"} value={passcode}
+                    onChange={(e) => { setPasscode(e.target.value); setError(null); }}
+                    className="w-full rounded-lg pl-9 pr-9 py-2.5 font-body text-sm outline-none"
+                    style={{ background: C.panel2, color: C.text, border: `1px solid ${C.line}` }} />
+                  <button type="button" onClick={() => setShowPass((v) => !v)} className="absolute right-3 top-1/2 -translate-y-1/2">
+                    {showPass ? <EyeOff size={14} color={C.faint} /> : <Eye size={14} color={C.faint} />}
+                  </button>
+                </div>
+              </>
+            )}
             {error && (
               <div className="flex items-center gap-1.5 font-body text-xs" style={{ color: C.orange }}>
                 <AlertCircle size={13} /> {error}
               </div>
             )}
-            <button type="submit" className="btn-modern w-full py-2.5 rounded-lg font-body text-sm font-medium"
+            <button type="submit" disabled={busy} className="btn-modern w-full py-2.5 rounded-lg font-body text-sm font-medium disabled:opacity-60"
               style={{ background: C.cyan, color: C.onAccent, boxShadow: "0 8px 24px -8px rgba(28,100,214,0.4)" }}>
-              Sign in
+              {busy ? "Signing in…" : "Sign in"}
             </button>
             <button type="button" onClick={() => { setMode("choose"); setError(null); }}
               className="w-full font-mono text-[11px]" style={{ color: C.faint }}>
@@ -2244,9 +2301,9 @@ function AccessGate({ sites, onAdminLogin, onClientAccess }) {
                 <AlertCircle size={13} /> {error}
               </div>
             )}
-            <button type="submit" className="btn-modern w-full py-2.5 rounded-lg font-body text-sm font-medium"
+            <button type="submit" disabled={busy} className="btn-modern w-full py-2.5 rounded-lg font-body text-sm font-medium disabled:opacity-60"
               style={{ background: C.cyan, color: C.onAccent, boxShadow: "0 8px 24px -8px rgba(28,100,214,0.4)" }}>
-              View my project
+              {busy ? "Looking up…" : "View my project"}
             </button>
             <button type="button" onClick={() => { setMode("choose"); setError(null); }}
               className="w-full font-mono text-[11px]" style={{ color: C.faint }}>
@@ -2535,89 +2592,197 @@ function AdminControls({ sites, onCreate, onUpdate, onDelete }) {
 /*  Root app                                                            */
 /* ------------------------------------------------------------------ */
 export default function App() {
-  const [sites, setSites] = useState(() => loadPersistedSites() ?? []);
+  const supabaseMode = isSupabaseConfigured();
+  const [sites, setSites] = useState(() => (supabaseMode ? [] : (loadPersistedSites() ?? [])));
   const [session, setSession] = useState(() => loadPersistedSession());
   const [view, setView] = useState("dashboard");
   const [activeSiteId, setActiveSiteId] = useState(null);
   const [clientPreview, setClientPreview] = useState(null); // { id, tab }
+  const [clientSiteData, setClientSiteData] = useState(null);
+  const [authReady, setAuthReady] = useState(!supabaseMode);
+  const [clientLoading, setClientLoading] = useState(false);
+  const [sitesLoading, setSitesLoading] = useState(supabaseMode);
+  const [dataError, setDataError] = useState(null);
 
-  useEffect(() => { persistSites(sites); }, [sites]);
+  // Local (no-Supabase) persistence — unchanged from the original build. Once
+  // Supabase is configured it becomes the source of truth and this is skipped.
+  useEffect(() => { if (!supabaseMode) persistSites(sites); }, [sites, supabaseMode]);
   useEffect(() => { persistSession(session); }, [session]);
+
+  // Restores the operator's Supabase auth session on load and reacts to
+  // sign-out happening elsewhere (another tab, an expired token).
+  useEffect(() => {
+    if (!supabaseMode) return;
+    let cancelled = false;
+    getOperatorSession().then((s) => {
+      if (cancelled) return;
+      setSession((prev) => {
+        if (s) return prev.role === "admin" ? prev : { role: "admin", siteId: null };
+        return prev.role === "admin" ? { role: null, siteId: null } : prev;
+      });
+      setAuthReady(true);
+    });
+    const unsubscribe = onOperatorAuthChange((s) => {
+      if (!s) setSession((prev) => (prev.role === "admin" ? { role: null, siteId: null } : prev));
+    });
+    return () => { cancelled = true; unsubscribe(); };
+  }, [supabaseMode]);
+
+  // Loads the signed-in operator's projects (and their flights) from Supabase.
+  useEffect(() => {
+    if (!supabaseMode || session.role !== "admin") return;
+    let cancelled = false;
+    setSitesLoading(true);
+    db.fetchOperatorSites()
+      .then((rows) => { if (!cancelled) setSites(rows); })
+      .catch((err) => { if (!cancelled) setDataError(err.message || "Couldn't load projects."); })
+      .finally(() => { if (!cancelled) setSitesLoading(false); });
+    return () => { cancelled = true; };
+  }, [supabaseMode, session.role]);
+
+  // Rehydrates a returning client session after a page reload — the project's
+  // access code (not any secret token) is kept in this browser's session record
+  // so the same SECURITY DEFINER lookup used at sign-in can run again.
+  useEffect(() => {
+    if (!supabaseMode || session.role !== "client" || !session.accessCode || clientSiteData) return;
+    let cancelled = false;
+    setClientLoading(true);
+    db.getSiteByAccessCode(session.accessCode)
+      .then((site) => { if (!cancelled) setClientSiteData(site); })
+      .catch(() => { if (!cancelled) setClientSiteData(null); })
+      .finally(() => { if (!cancelled) setClientLoading(false); });
+    return () => { cancelled = true; };
+  }, [supabaseMode, session.role, session.accessCode, clientSiteData]);
 
   const openSite = (id) => { setActiveSiteId(id); setView("site"); };
   const previewClient = (id, tab = "interactive") => setClientPreview({ id, tab });
-  const signOut = () => { setSession({ role: null, siteId: null }); setView("dashboard"); setActiveSiteId(null); setClientPreview(null); };
+  const signOut = () => {
+    if (supabaseMode) signOutOperator().catch(() => {});
+    setSession({ role: null, siteId: null });
+    setView("dashboard"); setActiveSiteId(null); setClientPreview(null); setClientSiteData(null);
+  };
 
   const handleIngested = (siteId, weekEntry) => {
     setSites((prev) => prev.map((s) => (s.id === siteId ? { ...s, _weeks: [...s._weeks, weekEntry] } : s)));
+    if (supabaseMode) db.addFlight(siteId, weekEntry).catch((err) => setDataError(err.message));
   };
 
   const handleIngestedListing = (siteId, listingUpdate) => {
     setSites((prev) => prev.map((s) => (s.id === siteId
       ? { ...s, listing: { ...(s.listing || {}), ...listingUpdate } }
       : s)));
+    if (supabaseMode) {
+      const merged = { ...(sites.find((s) => s.id === siteId)?.listing || {}), ...listingUpdate };
+      db.updateListing(siteId, merged).catch((err) => setDataError(err.message));
+    }
   };
 
   const updateListingDescription = (siteId, description, descriptionMode) => {
     setSites((prev) => prev.map((s) => (s.id === siteId
       ? { ...s, listing: { ...(s.listing || {}), description, descriptionMode } }
       : s)));
+    if (supabaseMode) {
+      const merged = { ...(sites.find((s) => s.id === siteId)?.listing || {}), description, descriptionMode };
+      db.updateListing(siteId, merged).catch((err) => setDataError(err.message));
+    }
   };
 
   const updateWeekTrades = (siteId, weekN, trades) => {
     setSites((prev) => prev.map((s) => (s.id === siteId
       ? { ...s, _weeks: s._weeks.map((w) => (w.n === weekN ? { ...w, trades } : w)) }
       : s)));
+    if (supabaseMode) db.updateFlightTrades(siteId, weekN, trades).catch((err) => setDataError(err.message));
   };
 
   const updateWeekNote = (siteId, weekN, note, noteMode) => {
     setSites((prev) => prev.map((s) => (s.id === siteId
       ? { ...s, _weeks: s._weeks.map((w) => (w.n === weekN ? { ...w, note, noteMode } : w)) }
       : s)));
+    if (supabaseMode) db.updateFlightNote(siteId, weekN, note, noteMode).catch((err) => setDataError(err.message));
   };
 
   const addWeekMedia = (siteId, weekN, item) => {
+    let nextMedia = [item];
     setSites((prev) => prev.map((s) => (s.id === siteId
-      ? { ...s, _weeks: s._weeks.map((w) => (w.n === weekN ? { ...w, media: [...(w.media || []), item] } : w)) }
+      ? { ...s, _weeks: s._weeks.map((w) => {
+          if (w.n !== weekN) return w;
+          nextMedia = [...(w.media || []), item];
+          return { ...w, media: nextMedia };
+        }) }
       : s)));
+    if (supabaseMode) db.updateFlightMedia(siteId, weekN, nextMedia).catch((err) => setDataError(err.message));
   };
 
   const removeWeekMedia = (siteId, weekN, mediaId) => {
+    let nextMedia = [];
     setSites((prev) => prev.map((s) => (s.id === siteId
-      ? { ...s, _weeks: s._weeks.map((w) => (w.n === weekN ? { ...w, media: (w.media || []).filter((m) => m.id !== mediaId) } : w)) }
+      ? { ...s, _weeks: s._weeks.map((w) => {
+          if (w.n !== weekN) return w;
+          nextMedia = (w.media || []).filter((m) => m.id !== mediaId);
+          return { ...w, media: nextMedia };
+        }) }
       : s)));
+    if (supabaseMode) db.updateFlightMedia(siteId, weekN, nextMedia).catch((err) => setDataError(err.message));
   };
 
   const createProject = (data) => {
-    setSites((prev) => [...prev, makeNewProject(data, prev.map((s) => s.id))]);
+    const project = makeNewProject(data, sites.map((s) => s.id));
+    setSites((prev) => [...prev, project]);
+    if (supabaseMode) db.createSite(project).catch((err) => setDataError(err.message));
   };
   const updateProject = (data) => {
     setSites((prev) => prev.map((s) => (s.id === data.id ? { ...s, ...data, icon: resolveIcon(data.iconKey) } : s)));
+    if (supabaseMode) db.updateSite(data).catch((err) => setDataError(err.message));
   };
   const deleteProject = (id) => {
     setSites((prev) => prev.filter((s) => s.id !== id));
     if (activeSiteId === id) { setActiveSiteId(null); setView("dashboard"); }
+    if (supabaseMode) db.deleteSite(id).catch((err) => setDataError(err.message));
   };
 
   const activeSite = sites.find((s) => s.id === activeSiteId);
 
-  const clientSite = session.role === "client" ? sites.find((s) => s.id === session.siteId) : null;
+  const clientSite = session.role === "client"
+    ? (supabaseMode ? clientSiteData : sites.find((s) => s.id === session.siteId))
+    : null;
   const clientAccessValid = !!(clientSite && clientSite.clientAccessEnabled);
 
   useEffect(() => {
-    if (session.role === "client" && !clientAccessValid) setSession({ role: null, siteId: null });
-  }, [session.role, clientAccessValid]);
+    if (session.role === "client" && clientSite && !clientAccessValid) setSession({ role: null, siteId: null });
+  }, [session.role, clientSite, clientAccessValid]);
+
+  if (!authReady || clientLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center font-body" style={{ background: C.bg }}>
+        <Loader2 className="animate-spin" size={22} color={C.cyan} />
+      </div>
+    );
+  }
 
   if (session.role === null || (session.role === "client" && !clientAccessValid)) {
     return (
-      <AccessGate sites={sites}
+      <AccessGate sites={sites} supabaseMode={supabaseMode}
         onAdminLogin={() => setSession({ role: "admin", siteId: null })}
-        onClientAccess={(id) => setSession({ role: "client", siteId: id })} />
+        onClientAccess={(id, siteData, accessCode) => {
+          if (siteData) setClientSiteData(siteData);
+          setSession({ role: "client", siteId: id, accessCode });
+        }} />
     );
   }
 
   if (session.role === "client") {
     return <ClientPortal site={clientSite} mode="client" onExitPreview={signOut} />;
+  }
+
+  if (supabaseMode && sitesLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center font-body" style={{ background: C.bg }}>
+        <div className="flex flex-col items-center gap-3">
+          <Loader2 className="animate-spin" size={22} color={C.cyan} />
+          <div className="font-mono text-[11px]" style={{ color: C.faint }}>Loading your projects…</div>
+        </div>
+      </div>
+    );
   }
 
   if (clientPreview) {
@@ -2679,6 +2844,14 @@ export default function App() {
       </div>
 
       <main className="flex-1 p-5 md:p-8 pt-16 md:pt-8 max-w-4xl relative z-10">
+        {dataError && (
+          <div className="fade-in-up mb-4 flex items-center gap-2 px-3.5 py-2.5 rounded-xl font-body text-xs"
+            style={{ background: "#FFF1EC", border: `1px solid ${C.orange}`, color: C.orange }}>
+            <AlertCircle size={14} />
+            <span className="flex-1">{dataError}</span>
+            <button onClick={() => setDataError(null)} className="font-mono text-[10px] uppercase tracking-widest">Dismiss</button>
+          </div>
+        )}
         {view === "dashboard" && <Dashboard sites={sites} onOpen={openSite} onGoToAdmin={() => setView("admin")} />}
         {view === "site" && activeSite && (
           <SiteDetail site={activeSite} onBack={() => setView("dashboard")} onPreviewClient={previewClient}
