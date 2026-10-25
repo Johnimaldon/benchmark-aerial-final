@@ -2834,7 +2834,7 @@ export default function App() {
       </aside>
 
       {/* mobile top nav */}
-      <div className="glass md:hidden fixed top-0 left-0 right-0 z-10 flex items-center gap-1 p-2 overflow-x-auto"
+      <div className="glass md:hidden fixed top-0 left-0 right-0 z-30 flex items-center gap-1 p-2 overflow-x-auto"
         style={{ background: "rgba(255,255,255,0.85)", borderBottom: `1px solid ${C.line}` }}>
         <button onClick={() => setView("dashboard")} className="btn-modern p-2 rounded-lg shrink-0" style={{ background: view === "dashboard" ? C.panel2 : "transparent" }}><Home size={16} color={C.text} /></button>
         <button onClick={() => setView("ingest")} className="btn-modern p-2 rounded-lg shrink-0" style={{ background: view === "ingest" ? C.panel2 : "transparent" }}><FolderInput size={16} color={C.text} /></button>
