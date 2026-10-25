@@ -171,6 +171,40 @@ function formatShortDate(date = new Date()) {
   return date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
 }
 
+function generateFlightId(siteId) {
+  return `${siteId}-flight-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+// Flights ingested before capturedAt existed only have the "Jan 5"-style display
+// string. This recovers a real, sortable date from it by assuming it refers to the
+// most recent occurrence of that month/day that isn't in the future — true for any
+// project under a year old, which covers the week-over-week tracking use case.
+function guessFullDate(shortDateStr) {
+  if (!shortDateStr) return new Date(0);
+  const now = new Date();
+  const guess = new Date(`${shortDateStr} ${now.getFullYear()}`);
+  if (isNaN(guess.getTime())) return new Date(0);
+  if (guess.getTime() > now.getTime() + 86400000) guess.setFullYear(guess.getFullYear() - 1);
+  return guess;
+}
+
+function weekSortTime(week) {
+  if (week.capturedAt) return new Date(`${week.capturedAt}T00:00:00`).getTime();
+  return guessFullDate(week.date).getTime();
+}
+
+// Lets a capture be ingested for a past date (backfilling flight history) and keeps
+// week numbers matching true chronological order rather than upload order.
+function renumberWeeksByDate(weeks) {
+  // No secondary tiebreak on purpose: Array.prototype.sort is stable, and the new
+  // capture is always appended last in `weeks` before sorting, so two captures
+  // dated the same day keep that insertion order instead of the newest jumping
+  // ahead because of its (meaningless, about-to-be-overwritten) placeholder n.
+  return [...weeks]
+    .sort((a, b) => weekSortTime(a) - weekSortTime(b))
+    .map((w, i) => ({ ...w, n: i + 1 }));
+}
+
 // Drafts a narrative locally from the trades/week data already on hand — there is
 // no backend in this build to safely hold an LLM API key, so this is a deterministic
 // template fill rather than a live model call. Same site+week always drafts the same
@@ -1363,7 +1397,9 @@ function ReceivingEngine({ sites, onIngested, onIngestedListing, onOpenSite, onG
   const [confidence, setConfidence] = useState(null);
   const [stage, setStage] = useState(-1);
   const [tradesOnSite, setTradesOnSite] = useState([]);
+  const [captureDate, setCaptureDate] = useState(() => new Date().toISOString().slice(0, 10));
   const timerRef = useRef(null);
+  const todayIso = new Date().toISOString().slice(0, 10);
 
   const site = sites.find((s) => s.id === (siteId || detectedId));
   const isRealEstate = site?.mode === "realEstate";
@@ -1392,7 +1428,10 @@ function ReceivingEngine({ sites, onIngested, onIngestedListing, onOpenSite, onG
     setStage(-1);
   };
 
-  const clearBatch = () => { setReceived([]); setDetectedId(null); setSiteId(null); setConfidence(null); setStage(-1); setTradesOnSite([]); };
+  const clearBatch = () => {
+    setReceived([]); setDetectedId(null); setSiteId(null); setConfidence(null); setStage(-1);
+    setTradesOnSite([]); setCaptureDate(new Date().toISOString().slice(0, 10));
+  };
 
   const begin = () => {
     setStage(0);
@@ -1410,14 +1449,23 @@ function ReceivingEngine({ sites, onIngested, onIngestedListing, onOpenSite, onG
   const hero = received[0];
 
   const finish = () => {
+    const displayDate = formatShortDate(new Date(`${captureDate}T00:00:00`));
     if (isRealEstate) {
       const photos = received.map((r, i) => ({ id: `${site.id}-listing-${Date.now()}-${i}`, dataUrl: r.dataUrl }));
-      onIngestedListing(site.id, { photos, capturedDate: formatShortDate() });
+      onIngestedListing(site.id, { photos, capturedDate: displayDate });
     } else {
-      const weeks = site._weeks;
-      const nextN = weeks.length ? weeks[weeks.length - 1].n + 1 : 1;
-      const photos = received.map((r, i) => ({ id: `${site.id}-w${nextN}-${i}`, dataUrl: r.dataUrl }));
-      onIngested(site.id, { n: nextN, date: formatShortDate(), real: true, dataUrl: hero.dataUrl, sourceCount: received.length, trades: tradesOnSite, photos });
+      const photos = received.map((r, i) => ({ id: `${site.id}-cap-${Date.now()}-${i}`, dataUrl: r.dataUrl }));
+      onIngested(site.id, {
+        id: generateFlightId(site.id),
+        n: 0, // recomputed from capturedAt by renumberWeeksByDate in App()
+        date: displayDate,
+        capturedAt: captureDate,
+        real: true,
+        dataUrl: hero.dataUrl,
+        sourceCount: received.length,
+        trades: tradesOnSite,
+        photos,
+      });
     }
     onOpenSite(site.id);
   };
@@ -1514,6 +1562,14 @@ function ReceivingEngine({ sites, onIngested, onIngestedListing, onOpenSite, onG
                 style={{ background: C.panel2, color: C.text, border: `1px solid ${C.line}` }}>
                 {sites.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
               </select>
+              <label className="font-mono text-[10px] uppercase tracking-widest block mt-3" style={{ color: C.faint }}>Capture date</label>
+              <input type="date" value={captureDate} max={todayIso}
+                onChange={(e) => setCaptureDate(e.target.value)}
+                className="w-full mt-1.5 rounded-lg px-3 py-2 font-body text-sm outline-none"
+                style={{ background: C.panel2, color: C.text, border: `1px solid ${C.line}` }} />
+              <div className="font-mono text-[10px] mt-1.5" style={{ color: C.faint }}>
+                Defaults to today — set an earlier date to backfill a past flight into its correct place in the history.
+              </div>
               <button onClick={begin} className="btn-modern w-full mt-4 py-3 rounded-lg font-body text-sm font-medium flex items-center justify-center gap-2"
                 style={{ background: C.cyan, color: C.onAccent, boxShadow: "0 8px 24px -8px rgba(28,100,214,0.4)" }}>
                 <Upload size={15} /> Process batch
@@ -1687,6 +1743,7 @@ function QuickCompare() {
 const INK = { text: "#12161C", muted: "#5B6672", faint: "#93A0AD", line: "#E4E7EB", panel: "#F7F8FA" };
 
 function PrintableReport({ site, weekA, weekB, weeks }) {
+  const hasComparison = weekA.n !== weekB.n;
   const [imgA, setImgA] = useState(null);
   const [imgB, setImgB] = useState(null);
   const [merged, setMerged] = useState(null);
@@ -1698,37 +1755,45 @@ function PrintableReport({ site, weekA, weekB, weeks }) {
     let cancelled = false;
     setLoading(true);
     (async () => {
-      const [ca, cb] = await Promise.all([sceneCanvas(weekA), sceneCanvas(weekB)]);
-      const { maskUrl, percent } = diffCanvases(ca, cb);
-      const mergeCanvas = document.createElement("canvas");
-      mergeCanvas.width = W; mergeCanvas.height = H;
-      const mctx = mergeCanvas.getContext("2d");
-      mctx.drawImage(cb, 0, 0);
-      const maskImg = new Image();
-      await new Promise((res) => { maskImg.onload = res; maskImg.src = maskUrl; });
-      mctx.globalAlpha = 0.85;
-      mctx.drawImage(maskImg, 0, 0);
-      mctx.globalAlpha = 1;
+      let ca = null, cb, maskUrl = null, percent = null, mergeUrl = null;
+
+      if (hasComparison) {
+        [ca, cb] = await Promise.all([sceneCanvas(weekA), sceneCanvas(weekB)]);
+        const diff = diffCanvases(ca, cb);
+        maskUrl = diff.maskUrl; percent = diff.percent;
+        const mergeCanvas = document.createElement("canvas");
+        mergeCanvas.width = W; mergeCanvas.height = H;
+        const mctx = mergeCanvas.getContext("2d");
+        mctx.drawImage(cb, 0, 0);
+        const maskImg = new Image();
+        await new Promise((res) => { maskImg.onload = res; maskImg.src = maskUrl; });
+        mctx.globalAlpha = 0.85;
+        mctx.drawImage(maskImg, 0, 0);
+        mctx.globalAlpha = 1;
+        mergeUrl = mergeCanvas.toDataURL();
+      } else {
+        cb = await sceneCanvas(weekB);
+      }
 
       const captures = await Promise.all(weeks.map(async (w) => {
-        const c = w.n === weekA.n ? ca : w.n === weekB.n ? cb : await sceneCanvas(w);
+        const c = hasComparison && w.n === weekA.n ? ca : w.n === weekB.n ? cb : await sceneCanvas(w);
         return { n: w.n, date: w.date, trades: w.trades || [], note: w.note || "", url: c.toDataURL() };
       }));
 
       if (cancelled) return;
-      setImgA(ca.toDataURL());
+      setImgA(hasComparison ? ca.toDataURL() : null);
       setImgB(cb.toDataURL());
-      setMerged(mergeCanvas.toDataURL());
+      setMerged(mergeUrl);
       setPct(percent);
       setAllCaptures(captures);
       setLoading(false);
     })();
     return () => { cancelled = true; };
-  }, [site, weekA, weekB, weeks]);
+  }, [site, weekA, weekB, weeks, hasComparison]);
 
   const today = new Date().toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" });
 
-  if (loading || !imgA) {
+  if (loading || !imgB) {
     return (
       <div className="rounded-xl p-10 flex items-center justify-center gap-2 font-mono text-xs"
         style={{ background: C.panel, border: `1px solid ${C.line}`, color: C.muted }}>
@@ -1777,8 +1842,12 @@ function PrintableReport({ site, weekA, weekB, weeks }) {
             {[
               { label: "Total flights", value: weeks.length },
               { label: "Tracking since", value: weeks[0].date },
-              { label: "Comparing", value: `W${weekA.n} → W${weekB.n}` },
-              { label: "Area changed", value: `${pct.toFixed(1)}%`, accent: true },
+              hasComparison
+                ? { label: "Comparing", value: `W${weekA.n} → W${weekB.n}` }
+                : { label: "Latest capture", value: `W${weekB.n} · ${weekB.date}` },
+              hasComparison
+                ? { label: "Area changed", value: `${pct.toFixed(1)}%`, accent: true }
+                : { label: "Status", value: "Baseline flight" },
             ].map((s) => (
               <div key={s.label} className="rounded-lg p-3" style={{ background: INK.panel, border: `1px solid ${INK.line}` }}>
                 <div className="font-mono text-[8.5px] uppercase tracking-widest mb-1" style={{ color: INK.faint }}>{s.label}</div>
@@ -1794,25 +1863,41 @@ function PrintableReport({ site, weekA, weekB, weeks }) {
             </p>
           </div>
 
-          <div className="font-display text-sm font-semibold mb-3" style={{ color: INK.text }}>
-            Capture comparison — W{weekA.n} ({weekA.date}) to W{weekB.n} ({weekB.date})
-          </div>
-          <div className="grid grid-cols-2 gap-4 mb-6">
-            <div>
-              <img src={imgA} className="w-full rounded-lg" style={{ border: `1px solid ${INK.line}` }} />
-              <div className="font-mono text-[10px] mt-1.5" style={{ color: INK.muted }}>Before · W{weekA.n} · {weekA.date}</div>
-            </div>
-            <div>
-              <img src={imgB} className="w-full rounded-lg" style={{ border: `1px solid ${INK.line}` }} />
-              <div className="font-mono text-[10px] mt-1.5" style={{ color: INK.muted }}>After · W{weekB.n} · {weekB.date}</div>
-            </div>
-          </div>
+          {hasComparison ? (
+            <>
+              <div className="font-display text-sm font-semibold mb-3" style={{ color: INK.text }}>
+                Capture comparison — W{weekA.n} ({weekA.date}) to W{weekB.n} ({weekB.date})
+              </div>
+              <div className="grid grid-cols-2 gap-4 mb-6">
+                <div>
+                  <img src={imgA} className="w-full rounded-lg" style={{ border: `1px solid ${INK.line}` }} />
+                  <div className="font-mono text-[10px] mt-1.5" style={{ color: INK.muted }}>Before · W{weekA.n} · {weekA.date}</div>
+                </div>
+                <div>
+                  <img src={imgB} className="w-full rounded-lg" style={{ border: `1px solid ${INK.line}` }} />
+                  <div className="font-mono text-[10px] mt-1.5" style={{ color: INK.muted }}>After · W{weekB.n} · {weekB.date}</div>
+                </div>
+              </div>
 
-          <div className="font-display text-sm font-semibold mb-3" style={{ color: INK.text }}>Change highlight</div>
-          <img src={merged} className="w-full rounded-lg mb-1.5" style={{ border: `1px solid ${INK.line}` }} />
-          <div className="font-mono text-[10px] mb-8" style={{ color: INK.muted }}>
-            Orange-highlighted regions mark automated, pixel-level change between the two captures above — {pct.toFixed(1)}% of the visible site surface.
-          </div>
+              <div className="font-display text-sm font-semibold mb-3" style={{ color: INK.text }}>Change highlight</div>
+              <img src={merged} className="w-full rounded-lg mb-1.5" style={{ border: `1px solid ${INK.line}` }} />
+              <div className="font-mono text-[10px] mb-8" style={{ color: INK.muted }}>
+                Orange-highlighted regions mark automated, pixel-level change between the two captures above — {pct.toFixed(1)}% of the visible site surface.
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="font-display text-sm font-semibold mb-3" style={{ color: INK.text }}>
+                Latest capture — W{weekB.n} ({weekB.date})
+              </div>
+              <img src={imgB} className="w-full rounded-lg mb-1.5" style={{ border: `1px solid ${INK.line}` }} />
+              <div className="font-mono text-[10px] mb-8" style={{ color: INK.muted }}>
+                This is the only capture on record for the selection above, so there's no prior flight to compare it
+                against yet — once a second flight is logged, this report will include a week-over-week change
+                comparison automatically.
+              </div>
+            </>
+          )}
 
           <div className="font-display text-sm font-semibold mb-3" style={{ color: INK.text }}>
             All flight captures ({allCaptures.length})
@@ -2091,7 +2176,7 @@ function ClientPortal({ site, mode, onExitPreview, initialTab = "interactive" })
               ))}
             </div>
 
-            {selected.length < 2 ? (
+            {tab === "interactive" && selected.length < 2 ? (
               <div className="no-print rounded-xl p-8 text-center font-body text-sm" style={{ background: C.panel, border: `1px solid ${C.line}`, color: C.muted }}>
                 {weeks.length === 1 ? "Only one capture so far — comparisons will appear after the next flight." : "Select one more capture above to compare."}
               </div>
@@ -2663,8 +2748,15 @@ export default function App() {
   };
 
   const handleIngested = (siteId, weekEntry) => {
-    setSites((prev) => prev.map((s) => (s.id === siteId ? { ...s, _weeks: [...s._weeks, weekEntry] } : s)));
-    if (supabaseMode) db.addFlight(siteId, weekEntry).catch((err) => setDataError(err.message));
+    const prevWeeks = sites.find((s) => s.id === siteId)?._weeks || [];
+    const renumbered = renumberWeeksByDate([...prevWeeks, weekEntry]);
+    setSites((prev) => prev.map((s) => (s.id === siteId ? { ...s, _weeks: renumbered } : s)));
+    if (supabaseMode) {
+      const inserted = renumbered.find((w) => w.id === weekEntry.id) || weekEntry;
+      db.addFlight(siteId, inserted)
+        .then(() => db.updateFlightNumbers(siteId, renumbered.filter((w) => w.id !== weekEntry.id)))
+        .catch((err) => setDataError(err.message));
+    }
   };
 
   const handleIngestedListing = (siteId, listingUpdate) => {

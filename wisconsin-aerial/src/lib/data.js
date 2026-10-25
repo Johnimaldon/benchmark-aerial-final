@@ -4,8 +4,10 @@ import { supabase } from "./supabaseClient";
 // the app already works with (see makeNewProject / ReceivingEngine.finish in App.jsx).
 function mapFlightRowToWeek(row) {
   return {
+    id: row.id,
     n: row.n,
     date: row.date,
+    capturedAt: row.captured_at ? row.captured_at.slice(0, 10) : undefined,
     real: true,
     dataUrl: row.hero_data_url,
     sourceCount: row.source_count,
@@ -103,10 +105,11 @@ export async function deleteSite(id) {
 
 export async function addFlight(siteId, week) {
   const { error } = await supabase.from("flights").insert({
-    id: `${siteId}-f${week.n}`,
+    id: week.id,
     site_id: siteId,
     n: week.n,
     date: week.date,
+    captured_at: week.capturedAt || null,
     source_count: week.sourceCount,
     hero_data_url: week.dataUrl,
     photos: week.photos || [],
@@ -117,6 +120,17 @@ export async function addFlight(siteId, week) {
     status: "ready",
   });
   if (error) throw error;
+}
+
+// Keeps flight numbers in Supabase matching the recomputed chronological order
+// after a backdated capture is inserted (see renumberWeeksByDate in App.jsx).
+// Targets rows by their stable id, since `n` itself is what's changing.
+export async function updateFlightNumbers(siteId, weeks) {
+  const results = await Promise.all(
+    weeks.filter((w) => w.id).map((w) => supabase.from("flights").update({ n: w.n }).eq("id", w.id))
+  );
+  const failed = results.find((r) => r.error);
+  if (failed) throw failed.error;
 }
 
 export async function updateFlightTrades(siteId, n, trades) {
