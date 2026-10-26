@@ -148,6 +148,23 @@ const W = 480, H = 300;
 /* ------------------------------------------------------------------ */
 const STORAGE_KEY_SITES = "wisconsin-aerial:sites";
 const STORAGE_KEY_SESSION = "wisconsin-aerial:session";
+const STORAGE_KEY_IMPORT_STATE = "wisconsin-aerial:cloud-import";
+
+// { [siteId]: "started" | "done" } for browser-only projects uploaded to the cloud.
+function loadImportState() {
+  try { return JSON.parse(localStorage.getItem(STORAGE_KEY_IMPORT_STATE) || "{}"); } catch { return {}; }
+}
+
+function setImportState(id, state) {
+  try { localStorage.setItem(STORAGE_KEY_IMPORT_STATE, JSON.stringify({ ...loadImportState(), [id]: state })); } catch {}
+}
+
+function pendingLocalImports(cloudSites) {
+  const cloudIds = new Set(cloudSites.map((s) => s.id));
+  const state = loadImportState();
+  return (loadPersistedSites() || []).filter((s) =>
+    state[s.id] !== "done" && (!cloudIds.has(s.id) || state[s.id] === "started"));
+}
 
 function defaultAccessCode(seed) {
   return Math.abs(hashStr(seed + "-access")).toString(36).slice(0, 6).toUpperCase();
@@ -377,6 +394,15 @@ function Logo({ size = 36 }) {
       <text x="32" y="42" textAnchor="middle" fontFamily="'Bricolage Grotesque', system-ui, sans-serif"
         fontWeight="800" fontSize="13" letterSpacing="0.5" fill={C.cyan}>AERIAL</text>
     </svg>
+  );
+}
+
+function BuildStamp({ className = "" }) {
+  const cloud = isSupabaseConfigured();
+  return (
+    <div className={`font-mono text-[9.5px] ${className}`} style={{ color: C.faint }}>
+      Build {__BUILD_ID__} · {cloud ? "Cloud sync on" : "Saved on this device only"}
+    </div>
   );
 }
 
@@ -2400,6 +2426,7 @@ function AccessGate({ sites, supabaseMode, onAdminLogin, onClientAccess }) {
         <p className="font-mono text-[10px] text-center mt-6" style={{ color: C.faint }}>
           Client access codes are issued by your project pilot.
         </p>
+        <BuildStamp className="text-center mt-2" />
       </div>
     </div>
   );
@@ -2688,6 +2715,8 @@ export default function App() {
   const [clientLoading, setClientLoading] = useState(false);
   const [sitesLoading, setSitesLoading] = useState(supabaseMode);
   const [dataError, setDataError] = useState(null);
+  const [localOnlySites, setLocalOnlySites] = useState([]);
+  const [importing, setImporting] = useState(false);
 
   // Local (no-Supabase) persistence — unchanged from the original build. Once
   // Supabase is configured it becomes the source of truth and this is skipped.
@@ -2719,7 +2748,7 @@ export default function App() {
     let cancelled = false;
     setSitesLoading(true);
     db.fetchOperatorSites()
-      .then((rows) => { if (!cancelled) setSites(rows); })
+      .then((rows) => { if (!cancelled) setSites(rows.map(hydrateSite)); })
       .catch((err) => { if (!cancelled) setDataError(err.message || "Couldn't load projects."); })
       .finally(() => { if (!cancelled) setSitesLoading(false); });
     return () => { cancelled = true; };
@@ -2733,11 +2762,44 @@ export default function App() {
     let cancelled = false;
     setClientLoading(true);
     db.getSiteByAccessCode(session.accessCode)
-      .then((site) => { if (!cancelled) setClientSiteData(site); })
+      .then((site) => { if (!cancelled) setClientSiteData(site ? hydrateSite(site) : null); })
       .catch(() => { if (!cancelled) setClientSiteData(null); })
       .finally(() => { if (!cancelled) setClientLoading(false); });
     return () => { cancelled = true; };
   }, [supabaseMode, session.role, session.accessCode, clientSiteData]);
+
+  // Projects created before cloud sync was switched on live only in this browser's
+  // storage; surface them once the cloud list has loaded so they can be uploaded
+  // instead of silently disappearing from view.
+  useEffect(() => {
+    if (!supabaseMode || session.role !== "admin" || sitesLoading) return;
+    setLocalOnlySites(pendingLocalImports(sites));
+  }, [supabaseMode, session.role, sitesLoading]);
+
+  const importLocalProjects = async () => {
+    // A retry after a partial upload must skip rows that already made it up.
+    const skipIfAlreadyUploaded = (pkey) => (err) => {
+      if (!String(err?.message).includes(`"${pkey}"`)) throw err;
+    };
+    setImporting(true);
+    let cloudSites = sites;
+    try {
+      for (const site of localOnlySites) {
+        setImportState(site.id, "started");
+        await db.createSite(site).catch(skipIfAlreadyUploaded("sites_pkey"));
+        // Legacy flights have no id; derive a stable one so a retry hits the same row.
+        const weeks = renumberWeeksByDate((site._weeks || []).map((w) => ({ ...w, id: w.id || `${site.id}-legacy-w${w.n}` })));
+        for (const w of weeks) await db.addFlight(site.id, w).catch(skipIfAlreadyUploaded("flights_pkey"));
+        setImportState(site.id, "done");
+      }
+    } catch (err) {
+      setDataError(`Upload stopped partway: ${err.message || err}. Anything already uploaded is safe; click Upload again to finish.`);
+    } finally {
+      try { cloudSites = (await db.fetchOperatorSites()).map(hydrateSite); setSites(cloudSites); } catch {}
+      setLocalOnlySites(pendingLocalImports(cloudSites));
+      setImporting(false);
+    }
+  };
 
   const openSite = (id) => { setActiveSiteId(id); setView("site"); };
   const previewClient = (id, tab = "interactive") => setClientPreview({ id, tab });
@@ -2856,7 +2918,7 @@ export default function App() {
       <AccessGate sites={sites} supabaseMode={supabaseMode}
         onAdminLogin={() => setSession({ role: "admin", siteId: null })}
         onClientAccess={(id, siteData, accessCode) => {
-          if (siteData) setClientSiteData(siteData);
+          if (siteData) setClientSiteData(hydrateSite(siteData));
           setSession({ role: "client", siteId: id, accessCode });
         }} />
     );
@@ -2922,6 +2984,7 @@ export default function App() {
           <button onClick={signOut} className="btn-modern w-full flex items-center gap-2 pt-3 font-mono text-[10px]" style={{ color: C.faint }}>
             <LogOut size={12} /> Sign out (admin)
           </button>
+          <BuildStamp className="mt-2" />
         </div>
       </aside>
 
@@ -2936,6 +2999,32 @@ export default function App() {
       </div>
 
       <main className="flex-1 p-5 md:p-8 pt-16 md:pt-8 max-w-4xl relative z-10">
+        {!supabaseMode && (
+          <div className="mb-4 flex items-start gap-2 px-3.5 py-2.5 rounded-xl font-body text-xs"
+            style={{ background: "#FFF7E6", border: "1px solid #F2C46D", color: "#7A5300" }}>
+            <AlertCircle size={14} className="shrink-0 mt-0.5" />
+            <span>
+              <strong>Saved on this device only.</strong> Projects here won't appear on your other devices, and client
+              access codes only work in this browser, until cloud sync is set up.
+            </span>
+          </div>
+        )}
+        {supabaseMode && localOnlySites.length > 0 && (
+          <div className="mb-4 flex items-center gap-3 px-3.5 py-2.5 rounded-xl font-body text-xs flex-wrap"
+            style={{ background: C.panel2, border: `1px solid ${C.cyanDim}`, color: C.text }}>
+            <Upload size={14} color={C.cyan} className="shrink-0" />
+            <span className="flex-1 min-w-[12rem]">
+              {localOnlySites.length} project{localOnlySites.length === 1 ? " is" : "s are"} saved only in this browser
+              ({localOnlySites.map((s) => s.name).join(", ")}). Upload to make {localOnlySites.length === 1 ? "it" : "them"} available
+              on every device.
+            </span>
+            <button onClick={importLocalProjects} disabled={importing}
+              className="btn-modern px-3 py-1.5 rounded-lg font-body text-xs font-medium disabled:opacity-60"
+              style={{ background: C.cyan, color: C.onAccent }}>
+              {importing ? "Uploading…" : "Upload to cloud"}
+            </button>
+          </div>
+        )}
         {dataError && (
           <div className="fade-in-up mb-4 flex items-center gap-2 px-3.5 py-2.5 rounded-xl font-body text-xs"
             style={{ background: "#FFF1EC", border: `1px solid ${C.orange}`, color: C.orange }}>
@@ -2959,6 +3048,7 @@ export default function App() {
         {view === "admin" && (
           <AdminControls sites={sites} onCreate={createProject} onUpdate={updateProject} onDelete={deleteProject} />
         )}
+        <BuildStamp className="md:hidden mt-10 text-center" />
       </main>
     </div>
   );
