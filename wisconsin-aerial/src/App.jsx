@@ -1,28 +1,45 @@
-import React, { useState, useRef, useEffect, useCallback, useMemo } from "react";
+import React, { useState, useRef, useEffect, useCallback } from "react";
 import {
   Plane, Radar, Layers, SlidersHorizontal, Columns, Upload, CheckCircle2,
-  Circle, ChevronRight, MapPin, Calendar, TrendingUp, Crosshair,
+  Circle, ChevronRight, MapPin, Calendar, TrendingUp,
   ArrowLeftRight, Building2, X, Loader2, ImagePlus, ArrowLeft, Home,
-  Share2, Link2, Copy, Check, ShieldCheck, LogOut, Satellite, FolderInput,
-  Images, Compass, Clock, ChevronDown, Download, FileText
+  Share2, Copy, Check, ShieldCheck, LogOut, Satellite, FolderInput,
+  Images, Compass, Clock, ChevronDown, Download, FileText,
+  Lock, KeyRound, Settings, Trash2, Plus, Pencil, RefreshCw, ShieldAlert,
+  Factory, Warehouse, TreePine, Eye, EyeOff, AlertCircle, UserCog,
+  Sparkles, Video, Image as ImageIcon, ScrollText, Mail
 } from "lucide-react";
+import { isSupabaseConfigured } from "./lib/supabaseClient";
+import * as db from "./lib/data";
+import { signInOperator, signOutOperator, getOperatorSession, onOperatorAuthChange } from "./lib/auth";
 
 /* ------------------------------------------------------------------ */
 /*  Tokens                                                              */
 /* ------------------------------------------------------------------ */
 const C = {
-  bg: "#080B10",
-  panel: "#11161D",
-  panel2: "#1B222C",
-  line: "#232C38",
-  cyan: "#3ED6C4",
-  cyanDim: "#215C56",
+  bg: "#F3F8FE",
+  panel: "#FFFFFF",
+  panel2: "#EDF4FC",
+  line: "#DCE7F5",
+  cyan: "#1C64D6",
+  cyanDim: "#BBD6F7",
+  skySoft: "#7EC1FA",
   orange: "#FF5D2E",
-  text: "#EDF1F5",
-  muted: "#8B96A3",
-  faint: "#4F5A66",
-  ok: "#6FCF97",
+  text: "#121826",
+  muted: "#5B6672",
+  faint: "#8B96A3",
+  ok: "#1C9A5B",
+  onAccent: "#FFFFFF",
 };
+
+/* ------------------------------------------------------------------ */
+/*  Icon registry — lets project icons round-trip through localStorage */
+/* ------------------------------------------------------------------ */
+const ICON_MAP = { Building2, Home, MapPin, Factory, Warehouse, TreePine };
+const ICON_OPTIONS = Object.keys(ICON_MAP);
+function resolveIcon(iconKey) {
+  return ICON_MAP[iconKey] || Building2;
+}
 
 const FONTS = `
 @import url('https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500..800&family=Plus+Jakarta+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
@@ -53,8 +70,8 @@ const FONTS = `
 }
 .card-lift:hover {
   transform: translateY(-4px);
-  box-shadow: 0 18px 40px -16px rgba(0,0,0,0.55), 0 0 0 1px rgba(62,214,196,0.15);
-  border-color: rgba(62,214,196,0.25) !important;
+  box-shadow: 0 18px 36px -18px rgba(18,24,38,0.18), 0 0 0 1px rgba(28,100,214,0.18);
+  border-color: rgba(28,100,214,0.3) !important;
 }
 .btn-modern {
   transition: transform 0.2s cubic-bezier(0.16,1,0.3,1), filter 0.2s ease, box-shadow 0.2s ease;
@@ -78,7 +95,7 @@ const FONTS = `
   position: absolute;
   left: 0; bottom: 0;
   height: 2px; width: 100%;
-  background: linear-gradient(90deg, #FF5D2E, #3ED6C4);
+  background: linear-gradient(90deg, #7EC1FA, #1C64D6);
   transform: scaleX(0);
   transform-origin: left;
   transition: transform 0.3s cubic-bezier(0.16,1,0.3,1);
@@ -119,176 +136,209 @@ function mulberry32(seed) {
 }
 
 /* ------------------------------------------------------------------ */
-/*  Site data — buildings carry a stage timeline so week-over-week      */
-/*  scenes are deterministic and the diff signal is meaningful          */
+/*  Site data — projects are created from scratch via Admin controls;   */
+/*  there is no seeded demo data                                       */
 /* ------------------------------------------------------------------ */
-const WEEK_DATES = ["Jul 13", "Jul 20", "Jul 27", "Aug 3", "Aug 10", "Aug 17"];
-
-const SITES = [
-  {
-    id: "foundry-row",
-    name: "Foundry Row — Phase 2",
-    address: "1180 Kestrel Way, Marrow County",
-    client: "Kestrel Development Group",
-    type: "Multifamily construction",
-    lat: 39.7684, lon: -86.1581,
-    icon: Building2,
-    terrain: ["#4b4536", "#3c3728"],
-    bounds: { x: 40, y: 40, w: 400, h: 220 },
-    roads: [{ x1: 0, y1: 250, x2: 480, y2: 250, w: 26 }],
-    buildings: [
-      { x: 70, y: 70, w: 90, h: 60, stages: [{ w: 1, c: "#8a7256" }, { w: 2, c: "#9aa3ab" }, { w: 3, c: "#caa06b" }, { w: 5, c: "#e3ddd0" }] },
-      { x: 180, y: 70, w: 90, h: 60, stages: [{ w: 1, c: "#8a7256" }, { w: 2, c: "#9aa3ab" }, { w: 4, c: "#caa06b" }] },
-      { x: 290, y: 70, w: 90, h: 60, stages: [{ w: 2, c: "#8a7256" }, { w: 3, c: "#9aa3ab" }] },
-      { x: 70, y: 150, w: 200, h: 40, stages: [{ w: 4, c: "#8a7256" }, { w: 5, c: "#9aa3ab" }, { w: 6, c: "#caa06b" }] },
-    ],
-  },
-  {
-    id: "riverstone",
-    name: "Riverstone Commercial Plaza",
-    address: "402 Halden Ave, Riverstone",
-    client: "Halden Retail Partners",
-    type: "Retail build-out",
-    lat: 39.8012, lon: -86.1102,
-    icon: Building2,
-    terrain: ["#5a5648", "#454135"],
-    bounds: { x: 30, y: 30, w: 420, h: 240 },
-    roads: [{ x1: 0, y1: 60, x2: 480, y2: 60, w: 22 }, { x1: 250, y1: 0, x2: 250, y2: 300, w: 18 }],
-    buildings: [
-      { x: 60, y: 100, w: 150, h: 110, stages: [{ w: 1, c: "#8a7256" }, { w: 2, c: "#9aa3ab" }, { w: 4, c: "#caa06b" }, { w: 6, c: "#e3ddd0" }] },
-      { x: 300, y: 100, w: 130, h: 90, stages: [{ w: 3, c: "#8a7256" }, { w: 4, c: "#9aa3ab" }, { w: 5, c: "#caa06b" }] },
-      { x: 300, y: 200, w: 130, h: 50, stages: [{ w: 5, c: "#8a7256" }] },
-    ],
-  },
-  {
-    id: "maple-ridge",
-    name: "Maple Ridge Estates — Lot 14",
-    address: "14 Songbird Ct, Maple Ridge",
-    client: "Maple Ridge Realty",
-    type: "Residential listing",
-    lat: 39.8467, lon: -86.2201,
-    icon: Home,
-    terrain: ["#4a5636", "#3a4429"],
-    bounds: { x: 60, y: 60, w: 360, h: 190 },
-    roads: [{ x1: 0, y1: 40, x2: 480, y2: 40, w: 20 }],
-    buildings: [
-      { x: 160, y: 100, w: 160, h: 100, stages: [{ w: 1, c: "#caa06b" }, { w: 3, c: "#e3ddd0" }] },
-      { x: 100, y: 210, w: 60, h: 30, stages: [{ w: 4, c: "#9aa3ab" }] },
-      { x: 330, y: 90, w: 45, h: 45, stages: [{ w: 5, c: "#9aa3ab" }] },
-    ],
-  },
-  {
-    id: "overlook",
-    name: "Overlook Business Park — Parcel C",
-    address: "9 Ridgeline Dr, Overlook",
-    client: "Overlook Land Holdings",
-    type: "Land / grading",
-    lat: 39.7211, lon: -86.0893,
-    icon: MapPin,
-    terrain: ["#6b6144", "#554d36"],
-    bounds: { x: 30, y: 30, w: 420, h: 240 },
-    roads: [{ x1: 0, y1: 270, x2: 480, y2: 270, w: 24 }],
-    buildings: [
-      { x: 80, y: 80, w: 320, h: 30, stages: [{ w: 2, c: "#8a7256" }] },
-      { x: 80, y: 130, w: 150, h: 20, stages: [{ w: 4, c: "#8a7256" }] },
-      { x: 260, y: 130, w: 140, h: 20, stages: [{ w: 5, c: "#8a7256" }] },
-    ],
-  },
-];
-
 const W = 480, H = 300;
 
 /* ------------------------------------------------------------------ */
-/*  Procedural scene renderer                                           */
+/*  Access control & persistence — everything below runs client-side    */
+/*  only (no backend), so localStorage is the source of truth for       */
+/*  admin-edited project data and the current session.                  */
 /* ------------------------------------------------------------------ */
-function stageColorAt(building, week) {
-  let c = null;
-  for (const s of building.stages) if (s.w <= week) c = s.c;
-  return c;
+const STORAGE_KEY_SITES = "wisconsin-aerial:sites";
+const STORAGE_KEY_SESSION = "wisconsin-aerial:session";
+const STORAGE_KEY_IMPORT_STATE = "wisconsin-aerial:cloud-import";
+
+// { [siteId]: "started" | "done" } for browser-only projects uploaded to the cloud.
+function loadImportState() {
+  try { return JSON.parse(localStorage.getItem(STORAGE_KEY_IMPORT_STATE) || "{}"); } catch { return {}; }
 }
 
-function drawScene(ctx, site, week) {
-  ctx.clearRect(0, 0, W, H);
-  const rngSite = mulberry32(hashStr(site.id));
-  const rngWeek = mulberry32(hashStr(site.id + "-" + week));
-
-  // terrain
-  const grad = ctx.createLinearGradient(0, 0, W, H);
-  grad.addColorStop(0, site.terrain[0]);
-  grad.addColorStop(1, site.terrain[1]);
-  ctx.fillStyle = grad;
-  ctx.fillRect(0, 0, W, H);
-
-  // ground speckle texture (seeded by site only — stable across weeks)
-  for (let i = 0; i < 220; i++) {
-    const x = rngSite() * W, y = rngSite() * H, r = 0.6 + rngSite() * 1.4;
-    ctx.fillStyle = `rgba(0,0,0,${0.05 + rngSite() * 0.08})`;
-    ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
-  }
-
-  // roads
-  ctx.strokeStyle = "#2b2a27";
-  site.roads.forEach((r) => {
-    ctx.lineWidth = r.w;
-    ctx.beginPath(); ctx.moveTo(r.x1, r.y1); ctx.lineTo(r.x2, r.y2); ctx.stroke();
-    ctx.strokeStyle = "#c9c2a8"; ctx.lineWidth = 1.2; ctx.setLineDash([8, 8]);
-    ctx.beginPath(); ctx.moveTo(r.x1, r.y1); ctx.lineTo(r.x2, r.y2); ctx.stroke();
-    ctx.setLineDash([]); ctx.strokeStyle = "#2b2a27";
-  });
-
-  // parcel boundary
-  ctx.strokeStyle = "rgba(255,255,255,0.35)";
-  ctx.lineWidth = 1.5; ctx.setLineDash([6, 5]);
-  ctx.strokeRect(site.bounds.x, site.bounds.y, site.bounds.w, site.bounds.h);
-  ctx.setLineDash([]);
-
-  // buildings by stage
-  site.buildings.forEach((b) => {
-    const col = stageColorAt(b, week);
-    if (!col) return;
-    ctx.fillStyle = "rgba(0,0,0,0.25)";
-    ctx.fillRect(b.x + 4, b.y + 4, b.w, b.h);
-    ctx.fillStyle = col;
-    ctx.fillRect(b.x, b.y, b.w, b.h);
-    const finalStage = b.stages[b.stages.length - 1];
-    if (finalStage.w <= week && (col === "#e3ddd0")) {
-      ctx.strokeStyle = "rgba(0,0,0,0.3)"; ctx.lineWidth = 1;
-      ctx.beginPath(); ctx.moveTo(b.x, b.y + b.h / 2); ctx.lineTo(b.x + b.w, b.y + b.h / 2); ctx.stroke();
-      ctx.fillStyle = "rgba(60,110,140,0.55)";
-      for (let wx = b.x + 8; wx < b.x + b.w - 8; wx += 18) ctx.fillRect(wx, b.y + 8, 8, 8);
-    }
-  });
-
-  // equipment (vehicles) — position changes week to week
-  const eqCount = 2 + Math.floor(rngWeek() * 3);
-  for (let i = 0; i < eqCount; i++) {
-    const x = site.bounds.x + rngWeek() * site.bounds.w;
-    const y = site.bounds.y + rngWeek() * site.bounds.h;
-    ctx.fillStyle = C.orange;
-    ctx.fillRect(x, y, 10, 6);
-    ctx.fillStyle = "#1a1a1a";
-    ctx.fillRect(x + 1, y + 6, 3, 2); ctx.fillRect(x + 6, y + 6, 3, 2);
-  }
-
-  // north arrow + scale bar (signature reticle motif)
-  ctx.save();
-  ctx.translate(W - 34, 34);
-  ctx.strokeStyle = "rgba(255,255,255,0.8)"; ctx.fillStyle = "rgba(255,255,255,0.8)";
-  ctx.beginPath(); ctx.arc(0, 0, 16, 0, Math.PI * 2); ctx.stroke();
-  ctx.beginPath(); ctx.moveTo(0, -16); ctx.lineTo(0, 16); ctx.moveTo(-16, 0); ctx.lineTo(16, 0); ctx.stroke();
-  ctx.beginPath(); ctx.moveTo(0, -16); ctx.lineTo(-4, -6); ctx.lineTo(4, -6); ctx.closePath(); ctx.fill();
-  ctx.restore();
-  ctx.fillStyle = "rgba(255,255,255,0.7)";
-  ctx.fillRect(16, H - 20, 40, 3);
-  ctx.font = "9px monospace";
-  ctx.fillText("50 M", 16, H - 24);
+function setImportState(id, state) {
+  try { localStorage.setItem(STORAGE_KEY_IMPORT_STATE, JSON.stringify({ ...loadImportState(), [id]: state })); } catch {}
 }
 
-function canvasFor(site, week) {
-  const c = document.createElement("canvas");
-  c.width = W; c.height = H;
-  drawScene(c.getContext("2d"), site, week);
-  return c;
+function pendingLocalImports(cloudSites) {
+  const cloudIds = new Set(cloudSites.map((s) => s.id));
+  const state = loadImportState();
+  return (loadPersistedSites() || []).filter((s) =>
+    state[s.id] !== "done" && (!cloudIds.has(s.id) || state[s.id] === "started"));
+}
+
+function defaultAccessCode(seed) {
+  return Math.abs(hashStr(seed + "-access")).toString(36).slice(0, 6).toUpperCase();
+}
+
+function generateAccessCode(seed) {
+  return Math.abs(hashStr(seed + "-" + Date.now() + "-" + Math.random())).toString(36).slice(0, 6).toUpperCase();
+}
+
+function slugify(name) {
+  return name.toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/(^-+|-+$)/g, "") || "project";
+}
+
+function uniqueId(base, existingIds) {
+  let id = base, n = 2;
+  while (existingIds.includes(id)) { id = `${base}-${n}`; n++; }
+  return id;
+}
+
+function formatShortDate(date = new Date()) {
+  return date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+}
+
+function generateFlightId(siteId) {
+  return `${siteId}-flight-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+// Flights ingested before capturedAt existed only have the "Jan 5"-style display
+// string. This recovers a real, sortable date from it by assuming it refers to the
+// most recent occurrence of that month/day that isn't in the future — true for any
+// project under a year old, which covers the week-over-week tracking use case.
+function guessFullDate(shortDateStr) {
+  if (!shortDateStr) return new Date(0);
+  const now = new Date();
+  const guess = new Date(`${shortDateStr} ${now.getFullYear()}`);
+  if (isNaN(guess.getTime())) return new Date(0);
+  if (guess.getTime() > now.getTime() + 86400000) guess.setFullYear(guess.getFullYear() - 1);
+  return guess;
+}
+
+function weekSortTime(week) {
+  if (week.capturedAt) return new Date(`${week.capturedAt}T00:00:00`).getTime();
+  return guessFullDate(week.date).getTime();
+}
+
+// Lets a capture be ingested for a past date (backfilling flight history) and keeps
+// week numbers matching true chronological order rather than upload order.
+function renumberWeeksByDate(weeks) {
+  // No secondary tiebreak on purpose: Array.prototype.sort is stable, and the new
+  // capture is always appended last in `weeks` before sorting, so two captures
+  // dated the same day keep that insertion order instead of the newest jumping
+  // ahead because of its (meaningless, about-to-be-overwritten) placeholder n.
+  return [...weeks]
+    .sort((a, b) => weekSortTime(a) - weekSortTime(b))
+    .map((w, i) => ({ ...w, n: i + 1 }));
+}
+
+// Drafts a narrative locally from the trades/week data already on hand — there is
+// no backend in this build to safely hold an LLM API key, so this is a deterministic
+// template fill rather than a live model call. Same site+week always drafts the same
+// way, so re-generating is stable until the underlying data changes.
+function generateActivityNarrative(site, week) {
+  const rng = mulberry32(hashStr(site.id + "-narrative-" + week.n));
+  const pick = (arr) => arr[Math.floor(rng() * arr.length)];
+  const trades = week.trades && week.trades.length ? week.trades.join(", ") : null;
+
+  const opener = pick([
+    `Flight W${week.n} (${week.date}) documents`,
+    `This week's capture at ${site.name} recorded`,
+    `The ${week.date} flight over ${site.name} shows`,
+  ]);
+  const activity = trades
+    ? `active ${trades.toLowerCase()} work across the site`
+    : `stable site conditions with no specific trade activity logged for this flight`;
+  const closer = pick([
+    "Imagery is aligned to the prior capture for accurate week-over-week comparison.",
+    "This capture is registered against the previous flight to support precise progress tracking.",
+    "Findings are cross-referenced against the prior week's capture for documentation continuity.",
+  ]);
+  return `${opener} ${activity}. ${closer}`;
+}
+
+// Same local-template approach as generateActivityNarrative, applied to a real-estate
+// listing instead of a construction flight: fabricates plausible, editable example
+// language for lot features / water-trail proximity / surrounding land use from the
+// aerial imagery. It is explicitly a draft — there is no parcel data source behind it,
+// so every output says so and needs a human to verify before it goes on MLS.
+function generateMlsDescription(site) {
+  const rng = mulberry32(hashStr(site.id + "-mls"));
+  const pick = (arr) => arr[Math.floor(rng() * arr.length)];
+
+  const lotFeature = pick([
+    "a level, cleared building pad", "mature tree cover along the perimeter",
+    "gently sloped topography with natural drainage", "an open, sun-exposed lot",
+    "a partially wooded parcel with a cleared homesite", "a corner lot with generous frontage",
+  ]);
+  const proximity = pick([
+    "within walking distance of a nearby trail system", "a short drive from the closest public water access",
+    "near a local greenway or trail corridor", "close to a nearby pond or wetland buffer",
+    "convenient to nearby recreational water access", "a few minutes from a shoreline park",
+  ]);
+  const surrounding = pick([
+    "surrounded by established low-density residential development", "adjacent to open agricultural land",
+    "bordered by a mix of residential and light commercial use", "set within a quiet, mostly residential corridor",
+    "near a growing mixed-use corridor", "backing to a wooded, undeveloped buffer",
+  ]);
+
+  return `This ${(site.type || "property").toLowerCase()} at ${site.address || site.name} offers ${lotFeature}. `
+    + `The aerial survey shows the parcel is ${proximity}, with the surrounding area ${surrounding}. `
+    + `The aerial perspective highlights the lot's layout and context for prospective buyers. `
+    + `Draft only — confirm all boundary, access, and proximity details before publishing to MLS.`;
+}
+
+function hydrateSite(raw) {
+  return { ...raw, icon: resolveIcon(raw.iconKey) };
+}
+
+function serializeSite(site) {
+  const { icon, ...rest } = site;
+  return rest;
+}
+
+function loadPersistedSites() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY_SITES);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed) || !parsed.length) return null;
+    return parsed.map(hydrateSite);
+  } catch {
+    return null;
+  }
+}
+
+function persistSites(sites) {
+  try {
+    localStorage.setItem(STORAGE_KEY_SITES, JSON.stringify(sites.map(serializeSite)));
+  } catch {}
+}
+
+function loadPersistedSession() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY_SESSION);
+    const parsed = raw ? JSON.parse(raw) : null;
+    if (parsed && (parsed.role === "admin" || parsed.role === "client")) return parsed;
+  } catch {}
+  return { role: null, siteId: null };
+}
+
+function persistSession(session) {
+  try {
+    if (!session.role) localStorage.removeItem(STORAGE_KEY_SESSION);
+    else localStorage.setItem(STORAGE_KEY_SESSION, JSON.stringify(session));
+  } catch {}
+}
+
+function makeNewProject({ name, address, client, type, iconKey, lat, lon, mode }, existingIds) {
+  const id = uniqueId(slugify(name), existingIds);
+  return {
+    id,
+    name,
+    address,
+    client,
+    type,
+    lat: Number(lat) || 0,
+    lon: Number(lon) || 0,
+    iconKey,
+    icon: resolveIcon(iconKey),
+    mode: mode === "realEstate" ? "realEstate" : "construction",
+    accessCode: defaultAccessCode(id),
+    clientAccessEnabled: true,
+    _weeks: [],
+    listing: { photos: [], capturedDate: null, description: "", descriptionMode: "manual" },
+  };
 }
 
 function loadImageToCanvas(dataUrl) {
@@ -307,9 +357,8 @@ function loadImageToCanvas(dataUrl) {
   });
 }
 
-async function sceneCanvas(site, weekEntry) {
-  if (weekEntry.real) return loadImageToCanvas(weekEntry.dataUrl);
-  return canvasFor(site, weekEntry.n);
+function sceneCanvas(weekEntry) {
+  return loadImageToCanvas(weekEntry.dataUrl);
 }
 
 function diffCanvases(canvasA, canvasB) {
@@ -335,12 +384,39 @@ function diffCanvases(canvasA, canvasB) {
 /* ------------------------------------------------------------------ */
 /*  Small UI atoms                                                      */
 /* ------------------------------------------------------------------ */
+function Logo({ size = 36 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 64 64" role="img" aria-label="Wisconsin Aerial" className="shrink-0">
+      <circle cx="32" cy="32" r="30" fill="#FFFFFF" stroke={C.line} strokeWidth="2" />
+      <circle cx="32" cy="32" r="30" fill="none" stroke={C.cyan} strokeWidth="1.5" opacity="0.4" />
+      <text x="32" y="28" textAnchor="middle" fontFamily="'Bricolage Grotesque', system-ui, sans-serif"
+        fontWeight="700" fontSize="8.5" letterSpacing="0.5" fill={C.text}>WISCONSIN</text>
+      <text x="32" y="42" textAnchor="middle" fontFamily="'Bricolage Grotesque', system-ui, sans-serif"
+        fontWeight="800" fontSize="13" letterSpacing="0.5" fill={C.cyan}>AERIAL</text>
+    </svg>
+  );
+}
+
+function BuildStamp({ className = "" }) {
+  const cloud = isSupabaseConfigured();
+  return (
+    <div className={`font-mono text-[9.5px] ${className}`} style={{ color: C.faint }}>
+      Build {__BUILD_ID__} · {cloud ? "Cloud sync on" : "Saved on this device only"}
+    </div>
+  );
+}
+
 function Badge({ children, tone = "muted" }) {
   const map = {
-    muted: { bg: "rgba(139,150,163,0.12)", fg: C.muted },
-    cyan: { bg: "rgba(62,214,196,0.14)", fg: C.cyan },
-    orange: { bg: "rgba(255,93,46,0.15)", fg: C.orange },
-    ok: { bg: "rgba(111,207,151,0.12)", fg: C.ok },
+    muted: { bg: "rgba(91,102,114,0.09)", fg: C.muted },
+    cyan: { bg: "rgba(28,100,214,0.12)", fg: C.cyan },
+    orange: { bg: "rgba(255,93,46,0.12)", fg: C.orange },
+    ok: { bg: "rgba(28,154,91,0.12)", fg: C.ok },
+    // Dark, theme-independent variants for badges placed on top of the
+    // aerial photo canvases, which stay dark/earthy regardless of app theme.
+    overlayMuted: { bg: "rgba(10,14,20,0.55)", fg: "#E7ECF2" },
+    overlayCyan: { bg: "rgba(10,14,20,0.55)", fg: "#8FC1FA" },
+    overlayOrange: { bg: "rgba(10,14,20,0.55)", fg: "#FF9166" },
   }[tone];
   return (
     <span className="font-mono text-[10px] tracking-wide uppercase px-2 py-1 rounded-md"
@@ -357,7 +433,7 @@ function NavButton({ active, icon: Icon, label, onClick }) {
       style={{
         background: active ? C.panel2 : "transparent",
         color: active ? C.text : C.muted,
-        borderLeft: active ? `2px solid ${C.orange}` : "2px solid transparent",
+        borderLeft: active ? `2px solid ${C.cyan}` : "2px solid transparent",
       }}>
       <Icon size={16} strokeWidth={2} />
       {label}
@@ -384,12 +460,12 @@ function FlightLogStrip({ weeks, selected, onToggle }) {
             <React.Fragment key={w.n}>
               {i > 0 && <div className="h-px w-6 shrink-0" style={{ background: C.line }} />}
               <button onClick={() => onToggle(w.n)} className="flex flex-col items-center gap-1.5 shrink-0 px-2 group">
-                <div className="w-px h-3" style={{ background: isSel ? C.orange : C.faint }} />
+                <div className="w-px h-3" style={{ background: isSel ? C.cyan : C.faint }} />
                 <div className="w-3 h-3 rounded-full transition-all"
                   style={{
-                    background: isSel ? C.orange : C.panel2,
-                    border: `2px solid ${isSel ? C.orange : C.line}`,
-                    boxShadow: isSel ? `0 0 0 3px rgba(255,93,46,0.18)` : "none",
+                    background: isSel ? C.cyan : C.panel2,
+                    border: `2px solid ${isSel ? C.cyan : C.line}`,
+                    boxShadow: isSel ? `0 0 0 3px rgba(28,100,214,0.18)` : "none",
                   }} />
                 <div className="font-mono text-[10px]" style={{ color: isSel ? C.text : C.faint }}>W{w.n}</div>
                 <div className="font-mono text-[9px]" style={{ color: isSel ? C.muted : C.faint }}>{w.date}</div>
@@ -444,14 +520,14 @@ function SliderCompare({ before, after, labelBefore, labelAfter }) {
         <div className="absolute inset-0 overflow-hidden" style={{ clipPath: `inset(0 ${100 - pct}% 0 0)` }}>
           <img src={before} alt="before" className="absolute inset-0 w-full h-full object-cover" draggable={false} />
         </div>
-        <div className="absolute top-0 bottom-0 w-0.5" style={{ left: `${pct}%`, background: C.orange }}>
+        <div className="absolute top-0 bottom-0 w-0.5" style={{ left: `${pct}%`, background: C.cyan }}>
           <div className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-7 h-7 rounded-full flex items-center justify-center"
-            style={{ background: C.orange, boxShadow: "0 4px 14px rgba(255,93,46,0.4)" }}>
-            <ArrowLeftRight size={14} color="#0A0E13" />
+            style={{ background: C.cyan, boxShadow: "0 4px 14px rgba(28,100,214,0.4)" }}>
+            <ArrowLeftRight size={14} color={C.onAccent} />
           </div>
         </div>
-        <div className="absolute top-2 left-2"><Badge tone="muted">{labelBefore}</Badge></div>
-        <div className="absolute top-2 right-2"><Badge tone="cyan">{labelAfter}</Badge></div>
+        <div className="absolute top-2 left-2"><Badge tone="overlayMuted">{labelBefore}</Badge></div>
+        <div className="absolute top-2 right-2"><Badge tone="overlayCyan">{labelAfter}</Badge></div>
       </div>
     </div>
   );
@@ -460,10 +536,43 @@ function SliderCompare({ before, after, labelBefore, labelAfter }) {
 /* ------------------------------------------------------------------ */
 /*  Compare workspace (slider / side-by-side / highlight)               */
 /* ------------------------------------------------------------------ */
-function CompareWorkspace({ site, weekA, weekB }) {
-  const [imgA, setImgA] = useState(null);
-  const [imgB, setImgB] = useState(null);
-  const [diff, setDiff] = useState(null);
+// Auto-matches each photo in weekA to its most visually similar counterpart in weekB
+// (nearest-neighbor on real pixel-difference distance, greedy — no ML feature matching,
+// just the same diffCanvases metric already used for the change-detection %), so a
+// multi-photo flight gets compared vantage-point to vantage-point rather than
+// arbitrarily first-photo to first-photo.
+async function matchWeekPhotoPairs(weekA, weekB) {
+  const photosA = weekA.photos && weekA.photos.length ? weekA.photos : [{ id: "a0", dataUrl: weekA.dataUrl }];
+  const photosB = weekB.photos && weekB.photos.length ? weekB.photos : [{ id: "b0", dataUrl: weekB.dataUrl }];
+  const [canvasesA, canvasesB] = await Promise.all([
+    Promise.all(photosA.map((p) => loadImageToCanvas(p.dataUrl))),
+    Promise.all(photosB.map((p) => loadImageToCanvas(p.dataUrl))),
+  ]);
+  const usedB = new Set();
+  const pairs = [];
+  for (let i = 0; i < canvasesA.length; i++) {
+    let bestIndex = -1, bestDiff = null;
+    for (let j = 0; j < canvasesB.length; j++) {
+      if (usedB.has(j)) continue;
+      const d = diffCanvases(canvasesA[i], canvasesB[j]);
+      if (!bestDiff || d.percent < bestDiff.percent) { bestDiff = d; bestIndex = j; }
+    }
+    if (bestIndex !== -1) {
+      usedB.add(bestIndex);
+      pairs.push({
+        aUrl: canvasesA[i].toDataURL(),
+        bUrl: canvasesB[bestIndex].toDataURL(),
+        percent: bestDiff.percent,
+        maskUrl: bestDiff.maskUrl,
+      });
+    }
+  }
+  return pairs;
+}
+
+function CompareWorkspace({ weekA, weekB }) {
+  const [pairs, setPairs] = useState([]);
+  const [pairIndex, setPairIndex] = useState(0);
   const [mode, setMode] = useState("slider");
   const [opacity, setOpacity] = useState(85);
   const [loading, setLoading] = useState(true);
@@ -472,30 +581,44 @@ function CompareWorkspace({ site, weekA, weekB }) {
     let cancelled = false;
     setLoading(true);
     (async () => {
-      const [ca, cb] = await Promise.all([sceneCanvas(site, weekA), sceneCanvas(site, weekB)]);
+      const matched = await matchWeekPhotoPairs(weekA, weekB);
       if (cancelled) return;
-      setImgA(ca.toDataURL());
-      setImgB(cb.toDataURL());
-      setDiff(diffCanvases(ca, cb));
+      setPairs(matched);
+      setPairIndex(0);
       setLoading(false);
     })();
     return () => { cancelled = true; };
-  }, [site, weekA, weekB]);
+  }, [weekA, weekB]);
 
-  if (loading || !imgA || !imgB) {
+  if (loading || !pairs.length) {
     return (
       <div className="rounded-xl flex items-center justify-center gap-2 font-mono text-xs"
         style={{ background: C.panel, border: `1px solid ${C.line}`, aspectRatio: `${W}/${H}`, color: C.muted }}>
-        <Loader2 size={14} className="animate-spin" /> Rendering comparison…
+        <Loader2 size={14} className="animate-spin" /> Matching captures…
       </div>
     );
   }
 
+  const current = pairs[Math.min(pairIndex, pairs.length - 1)];
   const labelA = `W${weekA.n} · ${weekA.date}`;
   const labelB = `W${weekB.n} · ${weekB.date}`;
 
   return (
     <div className="fade-in-up rounded-xl p-4" style={{ background: C.panel, border: `1px solid ${C.line}` }}>
+      {pairs.length > 1 && (
+        <div className="flex items-center gap-2 mb-4 overflow-x-auto pb-1">
+          <span className="font-mono text-[10px] uppercase tracking-widest shrink-0" style={{ color: C.faint }}>
+            Vantage point
+          </span>
+          {pairs.map((p, i) => (
+            <button key={i} onClick={() => setPairIndex(i)} className="btn-modern shrink-0 rounded-md overflow-hidden"
+              style={{ border: i === pairIndex ? `2px solid ${C.cyan}` : `1px solid ${C.line}` }}>
+              <img src={p.bUrl} className="w-14 h-9 object-cover block" />
+            </button>
+          ))}
+        </div>
+      )}
+
       <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
         <div className="flex items-center gap-2">
           {[
@@ -506,8 +629,8 @@ function CompareWorkspace({ site, weekA, weekB }) {
             <button key={t.id} onClick={() => setMode(t.id)}
               className="btn-modern flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-body"
               style={{
-                background: mode === t.id ? C.orange : C.panel2,
-                color: mode === t.id ? "#160C05" : C.muted,
+                background: mode === t.id ? C.cyan : C.panel2,
+                color: mode === t.id ? C.onAccent : C.muted,
                 fontWeight: mode === t.id ? 600 : 400,
               }}>
               <t.icon size={13} /> {t.label}
@@ -516,23 +639,23 @@ function CompareWorkspace({ site, weekA, weekB }) {
         </div>
         <div className="flex items-center gap-2 font-mono text-[11px]" style={{ color: C.muted }}>
           <TrendingUp size={13} color={C.orange} />
-          <span style={{ color: C.orange, fontWeight: 600 }}>{diff.percent.toFixed(1)}%</span>
+          <span style={{ color: C.orange, fontWeight: 600 }}>{current.percent.toFixed(1)}%</span>
           surface area changed
         </div>
       </div>
 
       {mode === "slider" && (
-        <SliderCompare before={imgA} after={imgB} labelBefore={labelA} labelAfter={labelB} />
+        <SliderCompare before={current.aUrl} after={current.bUrl} labelBefore={labelA} labelAfter={labelB} />
       )}
 
       {mode === "side" && (
         <div className="grid grid-cols-2 gap-3">
           <div>
-            <img src={imgA} className="w-full rounded-lg" style={{ border: `1px solid ${C.line}` }} />
+            <img src={current.aUrl} className="w-full rounded-lg" style={{ border: `1px solid ${C.line}` }} />
             <div className="mt-2"><Badge>{labelA}</Badge></div>
           </div>
           <div>
-            <img src={imgB} className="w-full rounded-lg" style={{ border: `1px solid ${C.line}` }} />
+            <img src={current.bUrl} className="w-full rounded-lg" style={{ border: `1px solid ${C.line}` }} />
             <div className="mt-2"><Badge tone="cyan">{labelB}</Badge></div>
           </div>
         </div>
@@ -541,14 +664,14 @@ function CompareWorkspace({ site, weekA, weekB }) {
       {mode === "highlight" && (
         <div>
           <div className="relative w-full rounded-lg overflow-hidden" style={{ border: `1px solid ${C.line}` }}>
-            <img src={imgB} className="w-full block" />
-            <img src={diff.maskUrl} className="absolute inset-0 w-full h-full" style={{ opacity: opacity / 100 }} />
-            <div className="absolute top-2 right-2"><Badge tone="orange">Changed area</Badge></div>
+            <img src={current.bUrl} className="w-full block" />
+            <img src={current.maskUrl} className="absolute inset-0 w-full h-full" style={{ opacity: opacity / 100 }} />
+            <div className="absolute top-2 right-2"><Badge tone="overlayOrange">Changed area</Badge></div>
           </div>
           <div className="flex items-center gap-3 mt-3">
             <span className="font-mono text-[10px]" style={{ color: C.faint }}>OVERLAY</span>
             <input type="range" min="0" max="100" value={opacity}
-              onChange={(e) => setOpacity(+e.target.value)} className="flex-1 accent-orange-500" />
+              onChange={(e) => setOpacity(+e.target.value)} className="flex-1 accent-blue-600" />
             <span className="font-mono text-[10px] w-8 text-right" style={{ color: C.muted }}>{opacity}%</span>
           </div>
         </div>
@@ -557,33 +680,122 @@ function CompareWorkspace({ site, weekA, weekB }) {
   );
 }
 
+function MediaTypeGallery({ type, weekA, weekB }) {
+  const meta = MEDIA_TABS.find((t) => t.id === type);
+  const label = meta ? meta.label : type;
+
+  const renderItem = (m) => (
+    m.type === "video" ? (
+      <video key={m.id} src={m.url} controls className="w-full rounded-lg"
+        style={{ border: `1px solid ${C.line}`, aspectRatio: `${W}/${H}`, background: "#000" }} />
+    ) : (
+      <img key={m.id} src={m.url} className="w-full rounded-lg object-cover"
+        style={{ border: `1px solid ${C.line}`, aspectRatio: `${W}/${H}` }} />
+    )
+  );
+
+  const renderColumn = (week) => {
+    const items = mediaForWeek(week, type);
+    return (
+      <div>
+        <div className="font-mono text-[11px] mb-2" style={{ color: C.faint }}>W{week.n} · {week.date}</div>
+        {items.length ? (
+          <div className="space-y-3">{items.map(renderItem)}</div>
+        ) : (
+          <div className="rounded-lg p-8 text-center font-mono text-xs flex items-center justify-center"
+            style={{ background: C.panel2, color: C.faint, border: `1px dashed ${C.line}`, aspectRatio: `${W}/${H}` }}>
+            No {label.toLowerCase()} for this week
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  return (
+    <div className="fade-in-up rounded-xl p-4" style={{ background: C.panel, border: `1px solid ${C.line}` }}>
+      <div className="grid grid-cols-2 gap-4">
+        {renderColumn(weekA)}
+        {renderColumn(weekB)}
+      </div>
+    </div>
+  );
+}
+
+function MediaWorkspace({ site, weekA, weekB }) {
+  const [tab, setTab] = useState("still");
+  return (
+    <div>
+      <div className="flex items-center gap-2 mb-4 flex-wrap">
+        {MEDIA_TABS.map((t) => (
+          <button key={t.id} onClick={() => setTab(t.id)}
+            className="btn-modern flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-body"
+            style={{
+              background: tab === t.id ? C.cyan : C.panel2,
+              color: tab === t.id ? C.onAccent : C.muted,
+              fontWeight: tab === t.id ? 600 : 400,
+            }}>
+            <t.icon size={13} /> {t.label}
+          </button>
+        ))}
+      </div>
+      {tab === "still"
+        ? <CompareWorkspace weekA={weekA} weekB={weekB} />
+        : <MediaTypeGallery type={tab} weekA={weekA} weekB={weekB} />}
+    </div>
+  );
+}
+
 /* ------------------------------------------------------------------ */
 /*  Dashboard                                                            */
 /* ------------------------------------------------------------------ */
 function SiteCard({ site, onOpen, index = 0 }) {
+  const isRealEstate = site.mode === "realEstate";
   const [thumb, setThumb] = useState(null);
   const [pct, setPct] = useState(null);
   const weeks = site._weeks;
+  const last = weeks[weeks.length - 1];
+  const prev = weeks[weeks.length - 2];
+  const listingPhoto = site.listing?.photos?.[0];
+
   useEffect(() => {
-    const last = weeks[weeks.length - 1], prev = weeks[weeks.length - 2];
+    if (isRealEstate || !last) return;
+    setThumb(null);
+    setPct(null);
     (async () => {
-      const [ca, cb] = await Promise.all([sceneCanvas(site, prev), sceneCanvas(site, last)]);
+      const cb = await sceneCanvas(last);
       setThumb(cb.toDataURL());
-      setPct(diffCanvases(ca, cb).percent);
+      if (prev) {
+        const ca = await sceneCanvas(prev);
+        setPct(diffCanvases(ca, cb).percent);
+      }
     })();
   }, [site]);
+
   const Icon = site.icon;
-  const last = weeks[weeks.length - 1];
+  const hasImage = isRealEstate ? !!listingPhoto : !!last;
   return (
     <button onClick={() => onOpen(site.id)}
       className="card-lift fade-in-up text-left rounded-2xl overflow-hidden"
       style={{ background: C.panel, border: `1px solid ${C.line}`, animationDelay: `${index * 70}ms` }}>
       <div className="relative" style={{ aspectRatio: `${W}/${H}`, background: C.panel2 }}>
-        {thumb ? <img src={thumb} className="w-full h-full object-cover" /> :
+        {!hasImage ? (
+          <div className="w-full h-full flex flex-col items-center justify-center gap-1.5">
+            <Satellite size={18} color={C.faint} />
+            <span className="font-mono text-[10px]" style={{ color: C.faint }}>{isRealEstate ? "No photos yet" : "No captures yet"}</span>
+          </div>
+        ) : isRealEstate ? (
+          <img src={listingPhoto.dataUrl} className="w-full h-full object-cover" />
+        ) : thumb ? <img src={thumb} className="w-full h-full object-cover" /> :
           <div className="w-full h-full flex items-center justify-center"><Loader2 size={16} className="animate-spin" color={C.faint} /></div>}
-        <div className="absolute top-2 left-2"><Badge tone="cyan">W{last.n} · {last.date}</Badge></div>
-        {pct !== null && (
-          <div className="absolute top-2 right-2"><Badge tone={pct > 4 ? "orange" : "muted"}>{pct.toFixed(1)}% Δ this week</Badge></div>
+        {isRealEstate ? (
+          hasImage && <div className="absolute top-2 left-2"><Badge tone="overlayCyan">Listing</Badge></div>
+        ) : (
+          <>
+            {last && <div className="absolute top-2 left-2"><Badge tone="overlayCyan">W{last.n} · {last.date}</Badge></div>}
+            {pct !== null && (
+              <div className="absolute top-2 right-2"><Badge tone={pct > 4 ? "overlayOrange" : "overlayMuted"}>{pct.toFixed(1)}% Δ this week</Badge></div>
+            )}
+          </>
         )}
       </div>
       <div className="p-3.5">
@@ -601,18 +813,43 @@ function SiteCard({ site, onOpen, index = 0 }) {
   );
 }
 
-function Dashboard({ sites, onOpen }) {
+function Dashboard({ sites, onOpen, onGoToAdmin }) {
   return (
     <div>
-      <div className="mb-6">
-        <h1 className="font-display text-2xl font-semibold" style={{ color: C.text }}>Active sites</h1>
-        <p className="font-body text-sm mt-1" style={{ color: C.muted }}>
-          {sites.length} sites under aerial survey · flown on a weekly cadence
-        </p>
+      <div className="rounded-2xl overflow-hidden mb-6" style={{ border: `1px solid ${C.line}` }}>
+        <div className="flex items-center gap-4 px-6 py-8 md:px-10 md:py-10"
+          style={{ background: "linear-gradient(135deg, #CFE7FC 0%, #EAF4FD 55%, #FFFFFF 100%)" }}>
+          <Logo size={54} />
+          <div>
+            <h1 className="font-display text-xl md:text-2xl font-extrabold tracking-tight" style={{ color: "#0B1E3D" }}>
+              WISCONSIN AERIAL IMAGERY
+            </h1>
+            <p className="font-body text-sm mt-1" style={{ color: C.muted }}>
+              {sites.length ? `${sites.length} ${sites.length === 1 ? "site" : "sites"} under aerial survey` : "Weekly drone survey, progress tracking, and client reporting."}
+            </p>
+          </div>
+        </div>
+        <div style={{ height: 4, background: "linear-gradient(90deg, #7EC1FA, #1C64D6)" }} />
       </div>
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        {sites.map((s, i) => <SiteCard key={s.id} site={s} onOpen={onOpen} index={i} />)}
-      </div>
+
+      {sites.length === 0 ? (
+        <div className="rounded-2xl p-10 text-center flex flex-col items-center gap-3"
+          style={{ background: C.panel, border: `1px dashed ${C.line}` }}>
+          <Plane size={22} color={C.cyan} />
+          <h2 className="font-display text-lg font-semibold" style={{ color: C.text }}>No projects yet</h2>
+          <p className="font-body text-sm max-w-sm" style={{ color: C.muted }}>
+            Set up your first project in Admin controls, then send flight imagery for it through the Receiving engine.
+          </p>
+          <button onClick={onGoToAdmin} className="btn-modern mt-2 flex items-center gap-1.5 px-4 py-2.5 rounded-lg font-body text-sm font-medium"
+            style={{ background: C.cyan, color: C.onAccent, boxShadow: "0 8px 24px -8px rgba(28,100,214,0.4)" }}>
+            <Plus size={15} /> New project
+          </button>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          {sites.map((s, i) => <SiteCard key={s.id} site={s} onOpen={onOpen} index={i} />)}
+        </div>
+      )}
     </div>
   );
 }
@@ -622,40 +859,44 @@ function Dashboard({ sites, onOpen }) {
 /* ------------------------------------------------------------------ */
 function ShareModal({ site, onClose, onPreview }) {
   const [copied, setCopied] = useState(false);
-  const token = useMemo(() => Math.abs(hashStr(site.id + "-share")).toString(36).slice(0, 8), [site.id]);
-  const link = `https://view.wisconsin-aerial.com/${site.id}/${token}`;
 
   const copy = async () => {
-    try { await navigator.clipboard.writeText(link); } catch (e) {}
+    try { await navigator.clipboard.writeText(site.accessCode); } catch (e) {}
     setCopied(true);
     setTimeout(() => setCopied(false), 1600);
   };
 
   return (
-    <div className="glass fixed inset-0 z-50 flex items-center justify-center p-5" style={{ background: "rgba(5,7,10,0.72)" }} onClick={onClose}>
+    <div className="glass fixed inset-0 z-50 flex items-center justify-center p-5" style={{ background: "rgba(18,24,38,0.45)" }} onClick={onClose}>
       <div onClick={(e) => e.stopPropagation()} className="fade-in-up w-full max-w-md rounded-2xl p-6"
-        style={{ background: C.panel, border: `1px solid ${C.line}`, boxShadow: "0 24px 60px -20px rgba(0,0,0,0.6)" }}>
+        style={{ background: C.panel, border: `1px solid ${C.line}`, boxShadow: "0 24px 60px -20px rgba(18,24,38,0.35)" }}>
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-2">
-            <Share2 size={16} color={C.orange} />
+            <Share2 size={16} color={C.cyan} />
             <h3 className="font-display text-lg font-semibold" style={{ color: C.text }}>Share with client</h3>
           </div>
           <button onClick={onClose}><X size={16} color={C.faint} /></button>
         </div>
         <p className="font-body text-sm mb-4" style={{ color: C.muted }}>
-          Anyone with this link gets a read-only report for <span style={{ color: C.text }}>{site.name}</span> —
+          Anyone with this access code gets a read-only report for <span style={{ color: C.text }}>{site.name}</span> —
           flight history, side-by-side captures, and change highlights. No sign-in, no access to other sites.
         </p>
-        <div className="flex items-center gap-2 rounded-lg px-3 py-2.5 mb-4" style={{ background: C.panel2, border: `1px solid ${C.line}` }}>
-          <Link2 size={13} color={C.faint} className="shrink-0" />
-          <span className="font-mono text-[11px] truncate flex-1" style={{ color: C.muted }}>{link}</span>
-          <button onClick={copy} className="btn-modern shrink-0 flex items-center gap-1 font-mono text-[10px] px-2 py-1 rounded"
-            style={{ background: copied ? "rgba(111,207,151,0.15)" : C.panel, color: copied ? C.ok : C.cyan }}>
-            {copied ? <Check size={11} /> : <Copy size={11} />} {copied ? "Copied" : "Copy"}
-          </button>
-        </div>
+        {site.clientAccessEnabled ? (
+          <div className="flex items-center gap-2 rounded-lg px-3 py-2.5 mb-4" style={{ background: C.panel2, border: `1px solid ${C.line}` }}>
+            <KeyRound size={13} color={C.faint} className="shrink-0" />
+            <span className="font-mono text-sm tracking-widest flex-1" style={{ color: C.text }}>{site.accessCode}</span>
+            <button onClick={copy} className="btn-modern shrink-0 flex items-center gap-1 font-mono text-[10px] px-2 py-1 rounded"
+              style={{ background: copied ? "rgba(28,154,91,0.12)" : C.panel2, color: copied ? C.ok : C.cyan }}>
+              {copied ? <Check size={11} /> : <Copy size={11} />} {copied ? "Copied" : "Copy"}
+            </button>
+          </div>
+        ) : (
+          <div className="flex items-center gap-2 rounded-lg px-3 py-2.5 mb-4 font-body text-xs" style={{ background: "rgba(255,93,46,0.08)", color: C.orange }}>
+            <AlertCircle size={14} /> Client access is currently disabled for this project. Enable it in Admin controls.
+          </div>
+        )}
         <button onClick={onPreview} className="btn-modern w-full py-2.5 rounded-lg font-body text-sm font-medium flex items-center justify-center gap-2"
-          style={{ background: C.orange, color: "#160C05", boxShadow: "0 8px 24px -8px rgba(255,93,46,0.45)" }}>
+          style={{ background: C.cyan, color: C.onAccent, boxShadow: "0 8px 24px -8px rgba(28,100,214,0.4)" }}>
           <Compass size={14} /> Preview what your client sees
         </button>
       </div>
@@ -663,9 +904,243 @@ function ShareModal({ site, onClose, onPreview }) {
   );
 }
 
-function SiteDetail({ site, onBack, onPreviewClient }) {
+function WeekTradesRow({ week, onSave }) {
+  const [editing, setEditing] = useState(false);
+  const trades = week.trades || [];
+
+  return (
+    <div className="rounded-lg p-3" style={{ background: C.panel, border: `1px solid ${C.line}` }}>
+      <div className="flex items-center justify-between gap-2">
+        <span className="font-mono text-xs" style={{ color: C.text }}>W{week.n} · {week.date}</span>
+        <button onClick={() => setEditing((v) => !v)} className="font-mono text-[10px] uppercase tracking-widest" style={{ color: C.cyan }}>
+          {editing ? "Done" : "Edit trades"}
+        </button>
+      </div>
+      {editing ? (
+        <div className="mt-3">
+          <TradesEditor trades={trades} onChange={(next) => onSave(week.n, next)} />
+        </div>
+      ) : (
+        <div className="flex flex-wrap gap-1.5 mt-2">
+          {trades.length ? trades.map((t) => <Badge key={t} tone="cyan">{t}</Badge>) :
+            <span className="font-mono text-[11px]" style={{ color: C.faint }}>No trades logged</span>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function WeekNoteRow({ site, week, onSave }) {
+  const [editing, setEditing] = useState(false);
+  const note = week.note || "";
+  const mode = week.noteMode || "manual";
+  const [draft, setDraft] = useState(note);
+  const [draftMode, setDraftMode] = useState(mode);
+
+  const startEditing = () => { setDraft(note); setDraftMode(mode); setEditing(true); };
+  const generate = () => { setDraft(generateActivityNarrative(site, week)); setDraftMode("ai"); };
+  const save = () => { onSave(week.n, draft, draftMode); setEditing(false); };
+
+  return (
+    <div className="rounded-lg p-3" style={{ background: C.panel, border: `1px solid ${C.line}` }}>
+      <div className="flex items-center justify-between gap-2">
+        <span className="font-mono text-xs" style={{ color: C.text }}>W{week.n} · {week.date}</span>
+        <div className="flex items-center gap-2">
+          {note && !editing && <Badge tone={mode === "ai" ? "cyan" : "muted"}>{mode === "ai" ? "AI draft" : "Manual"}</Badge>}
+          {!editing && (
+            <button onClick={startEditing} className="font-mono text-[10px] uppercase tracking-widest" style={{ color: C.cyan }}>
+              {note ? "Edit" : "Add narrative"}
+            </button>
+          )}
+        </div>
+      </div>
+      {editing ? (
+        <div className="mt-2 space-y-2">
+          <textarea value={draft} onChange={(e) => { setDraft(e.target.value); setDraftMode("manual"); }} rows={3}
+            placeholder="Describe what's happening on site this week…"
+            className="w-full rounded-lg px-3 py-2 font-body text-xs outline-none resize-none" style={inputStyle} />
+          <div className="flex items-center gap-2 flex-wrap">
+            <button type="button" onClick={generate}
+              className="btn-modern flex items-center gap-1.5 px-3 py-1.5 rounded-md font-mono text-[10px]"
+              style={{ background: C.panel2, color: C.cyan, border: `1px solid ${C.line}` }}>
+              <Sparkles size={12} /> Generate draft
+            </button>
+            <button type="button" onClick={save}
+              className="btn-modern px-3 py-1.5 rounded-md font-mono text-[10px] font-medium" style={{ background: C.cyan, color: C.onAccent }}>
+              Save
+            </button>
+            <button type="button" onClick={() => setEditing(false)} className="font-mono text-[10px]" style={{ color: C.faint }}>
+              Cancel
+            </button>
+          </div>
+        </div>
+      ) : (
+        <p className="font-body text-xs mt-2 leading-relaxed" style={{ color: note ? C.muted : C.faint }}>
+          {note || "No activity narrative recorded."}
+        </p>
+      )}
+    </div>
+  );
+}
+
+function WeekMediaRow({ week, onAddMedia, onRemoveMedia }) {
+  const [type, setType] = useState("panorama");
+  const media = week.media || [];
+
+  const handleFile = (file) => {
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => onAddMedia(week.n, { id: `${week.n}-${Date.now()}`, type, url: reader.result, name: file.name });
+    reader.readAsDataURL(file);
+  };
+
+  return (
+    <div className="rounded-lg p-3" style={{ background: C.panel, border: `1px solid ${C.line}` }}>
+      <div className="flex items-center justify-between gap-2 mb-2 flex-wrap">
+        <span className="font-mono text-xs" style={{ color: C.text }}>W{week.n} · {week.date}</span>
+        <div className="flex items-center gap-1.5">
+          <select value={type} onChange={(e) => setType(e.target.value)}
+            className="rounded-md px-1.5 py-1 font-mono text-[10px] outline-none" style={inputStyle}>
+            {EXTRA_MEDIA_TYPES.map((m) => <option key={m.id} value={m.id}>{m.label}</option>)}
+          </select>
+          <label className="btn-modern flex items-center gap-1 px-2 py-1 rounded-md font-mono text-[10px] cursor-pointer"
+            style={{ background: C.panel2, border: `1px solid ${C.line}`, color: C.cyan }}>
+            <Plus size={11} /> Add
+            <input type="file" accept="image/*,video/*" className="hidden"
+              onChange={(e) => { handleFile(e.target.files[0]); e.target.value = ""; }} />
+          </label>
+        </div>
+      </div>
+      {media.length ? (
+        <div className="flex flex-wrap gap-2">
+          {media.map((m) => (
+            <div key={m.id} className="relative shrink-0 w-20 rounded-md overflow-hidden" style={{ border: `1px solid ${C.line}` }}>
+              {m.type === "video" ? (
+                <video src={m.url} className="w-full h-14 object-cover" muted />
+              ) : (
+                <img src={m.url} className="w-full h-14 object-cover" />
+              )}
+              <div className="absolute bottom-0 inset-x-0 px-1 py-0.5 font-mono text-[7.5px] text-center uppercase"
+                style={{ background: "rgba(10,14,20,0.6)", color: "#fff" }}>
+                {EXTRA_MEDIA_TYPES.find((t) => t.id === m.type)?.label}
+              </div>
+              <button onClick={() => onRemoveMedia(week.n, m.id)} className="absolute top-0.5 right-0.5 rounded-full p-0.5" style={{ background: "rgba(10,14,20,0.6)" }}>
+                <X size={10} color="#fff" />
+              </button>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <span className="font-mono text-[11px]" style={{ color: C.faint }}>No panorama, video, or ortho attachments yet</span>
+      )}
+    </div>
+  );
+}
+
+function RealEstateBody({ site, onGoToIngest, onUpdateDescription }) {
+  const listing = site.listing || { photos: [], capturedDate: null, description: "", descriptionMode: "manual" };
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(listing.description);
+  const [draftMode, setDraftMode] = useState(listing.descriptionMode || "manual");
+
+  const startEditing = () => { setDraft(listing.description); setDraftMode(listing.descriptionMode || "manual"); setEditing(true); };
+  const generate = () => { setDraft(generateMlsDescription(site)); setDraftMode("ai"); };
+  const save = () => { onUpdateDescription(site.id, draft, draftMode); setEditing(false); };
+
+  return (
+    <div>
+      {!listing.photos.length ? (
+        <div className="rounded-xl p-8 text-center font-body text-sm flex flex-col items-center gap-3" style={{ background: C.panel, border: `1px solid ${C.line}`, color: C.muted }}>
+          <Satellite size={20} color={C.faint} />
+          <span>No aerial photos uploaded yet for this listing.</span>
+          <button onClick={onGoToIngest}
+            className="btn-modern flex items-center gap-1.5 px-3.5 py-2 rounded-lg font-body text-xs font-medium"
+            style={{ background: C.cyan, color: "#FFFFFF" }}>
+            <FolderInput size={13} /> Add aerial photos
+          </button>
+        </div>
+      ) : (
+        <>
+          <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+            <h2 className="font-display text-base font-semibold" style={{ color: C.text }}>Aerial photos</h2>
+            <span className="font-mono text-[10px]" style={{ color: C.faint }}>Captured {listing.capturedDate}</span>
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 mb-4">
+            {listing.photos.map((p) => (
+              <img key={p.id} src={p.dataUrl} className="w-full rounded-lg object-cover" style={{ border: `1px solid ${C.line}`, aspectRatio: `${W}/${H}` }} />
+            ))}
+          </div>
+          <button onClick={onGoToIngest}
+            className="btn-modern mb-6 flex items-center gap-1.5 px-3.5 py-2 rounded-lg font-body text-xs font-medium"
+            style={{ background: C.panel2, color: C.cyan, border: `1px solid ${C.line}` }}>
+            <FolderInput size={13} /> Replace with new photos
+          </button>
+        </>
+      )}
+
+      <div className="mt-2">
+        <div className="flex items-center gap-2 mb-1">
+          <ScrollText size={15} color={C.cyan} />
+          <h2 className="font-display text-base font-semibold" style={{ color: C.text }}>MLS description draft</h2>
+        </div>
+        <p className="font-body text-xs mb-3" style={{ color: C.muted }}>
+          Draft lot features, water/trail proximity, and surrounding land use from the aerial imagery — write it yourself or generate a starting draft.
+        </p>
+        <div className="rounded-lg p-3" style={{ background: C.panel, border: `1px solid ${C.line}` }}>
+          <div className="flex items-center justify-between gap-2">
+            <span className="font-mono text-xs" style={{ color: C.text }}>Listing description</span>
+            <div className="flex items-center gap-2">
+              {listing.description && !editing && (
+                <Badge tone={listing.descriptionMode === "ai" ? "cyan" : "muted"}>
+                  {listing.descriptionMode === "ai" ? "AI draft" : "Manual"}
+                </Badge>
+              )}
+              {!editing && (
+                <button onClick={startEditing} className="font-mono text-[10px] uppercase tracking-widest" style={{ color: C.cyan }}>
+                  {listing.description ? "Edit" : "Add description"}
+                </button>
+              )}
+            </div>
+          </div>
+          {editing ? (
+            <div className="mt-2 space-y-2">
+              <textarea value={draft} onChange={(e) => { setDraft(e.target.value); setDraftMode("manual"); }} rows={5}
+                placeholder="Describe the lot, proximity to water/trails, and surrounding land use…"
+                className="w-full rounded-lg px-3 py-2 font-body text-xs outline-none resize-none" style={inputStyle} />
+              <div className="flex items-center gap-2 flex-wrap">
+                <button type="button" onClick={generate}
+                  className="btn-modern flex items-center gap-1.5 px-3 py-1.5 rounded-md font-mono text-[10px]"
+                  style={{ background: C.panel2, color: C.cyan, border: `1px solid ${C.line}` }}>
+                  <Sparkles size={12} /> Generate draft
+                </button>
+                <button type="button" onClick={save}
+                  className="btn-modern px-3 py-1.5 rounded-md font-mono text-[10px] font-medium" style={{ background: C.cyan, color: C.onAccent }}>
+                  Save
+                </button>
+                <button type="button" onClick={() => setEditing(false)} className="font-mono text-[10px]" style={{ color: C.faint }}>
+                  Cancel
+                </button>
+              </div>
+            </div>
+          ) : (
+            <p className="font-body text-xs mt-2 leading-relaxed" style={{ color: listing.description ? C.muted : C.faint }}>
+              {listing.description || "No description drafted yet."}
+            </p>
+          )}
+        </div>
+        <p className="font-mono text-[9.5px] mt-2" style={{ color: C.faint }}>
+          Draft only — verify all lot, access, and proximity details before publishing to MLS.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function SiteDetail({ site, onBack, onPreviewClient, onGoToIngest, onUpdateTrades, onUpdateNote, onAddMedia, onRemoveMedia, onUpdateListingDescription }) {
   const weeks = site._weeks;
-  const [selected, setSelected] = useState([weeks[weeks.length - 2].n, weeks[weeks.length - 1].n]);
+  const [selected, setSelected] = useState(() =>
+    weeks.length >= 2 ? [weeks[weeks.length - 2].n, weeks[weeks.length - 1].n] : weeks.length === 1 ? [weeks[0].n] : []
+  );
   const [showShare, setShowShare] = useState(false);
 
   const toggle = (n) => {
@@ -708,16 +1183,72 @@ function SiteDetail({ site, onBack, onPreviewClient }) {
         <MapPin size={12} /> {site.address}
       </div>
 
-      <div className="mb-4">
-        <FlightLogStrip weeks={weeks} selected={selected} onToggle={toggle} />
-      </div>
-
-      {selected.length < 2 ? (
-        <div className="rounded-xl p-8 text-center font-body text-sm" style={{ background: C.panel, border: `1px solid ${C.line}`, color: C.muted }}>
-          Select one more capture on the flight log to build a comparison.
+      {site.mode === "realEstate" ? (
+        <RealEstateBody site={site} onGoToIngest={onGoToIngest} onUpdateDescription={onUpdateListingDescription} />
+      ) : weeks.length === 0 ? (
+        <div className="rounded-xl p-8 text-center font-body text-sm flex flex-col items-center gap-3" style={{ background: C.panel, border: `1px solid ${C.line}`, color: C.muted }}>
+          <Satellite size={20} color={C.faint} />
+          <span>No flights logged yet for this project.</span>
+          <button onClick={onGoToIngest}
+            className="btn-modern flex items-center gap-1.5 px-3.5 py-2 rounded-lg font-body text-xs font-medium"
+            style={{ background: C.cyan, color: "#FFFFFF" }}>
+            <FolderInput size={13} /> Add the first capture
+          </button>
         </div>
       ) : (
-        <CompareWorkspace site={site} weekA={weekA} weekB={weekB} />
+        <>
+          <div className="mb-4">
+            <FlightLogStrip weeks={weeks} selected={selected} onToggle={toggle} />
+          </div>
+          {selected.length < 2 ? (
+            <div className="rounded-xl p-8 text-center font-body text-sm" style={{ background: C.panel, border: `1px solid ${C.line}`, color: C.muted }}>
+              {weeks.length === 1
+                ? "One capture logged so far. Add another flight to unlock comparisons."
+                : "Select one more capture on the flight log to build a comparison."}
+            </div>
+          ) : (
+            <MediaWorkspace site={site} weekA={weekA} weekB={weekB} />
+          )}
+
+          <div className="mt-6">
+            <h2 className="font-display text-base font-semibold mb-3" style={{ color: C.text }}>Trades on site</h2>
+            <div className="space-y-2">
+              {[...weeks].reverse().map((w) => (
+                <WeekTradesRow key={w.n} week={w} onSave={(n, trades) => onUpdateTrades(site.id, n, trades)} />
+              ))}
+            </div>
+          </div>
+
+          <div className="mt-6">
+            <div className="flex items-center gap-2 mb-1">
+              <ScrollText size={15} color={C.cyan} />
+              <h2 className="font-display text-base font-semibold" style={{ color: C.text }}>Site activity narratives</h2>
+            </div>
+            <p className="font-body text-xs mb-3" style={{ color: C.muted }}>
+              Build a documented record of what happened on site each week — write it yourself or generate a draft from the logged trades.
+            </p>
+            <div className="space-y-2">
+              {[...weeks].reverse().map((w) => (
+                <WeekNoteRow key={w.n} site={site} week={w}
+                  onSave={(n, text, mode) => onUpdateNote(site.id, n, text, mode)} />
+              ))}
+            </div>
+          </div>
+
+          <div className="mt-6">
+            <h2 className="font-display text-base font-semibold mb-1" style={{ color: C.text }}>Media library</h2>
+            <p className="font-body text-xs mb-3" style={{ color: C.muted }}>
+              Attach panoramas, walkthrough video, or standalone ortho exports to any flight — viewable from the tabs above alongside stills.
+            </p>
+            <div className="space-y-2">
+              {[...weeks].reverse().map((w) => (
+                <WeekMediaRow key={w.n} week={w}
+                  onAddMedia={(n, item) => onAddMedia(site.id, n, item)}
+                  onRemoveMedia={(n, id) => onRemoveMedia(site.id, n, id)} />
+              ))}
+            </div>
+          </div>
+        </>
       )}
 
       {showShare && (
@@ -731,7 +1262,7 @@ function SiteDetail({ site, onBack, onPreviewClient }) {
 /* ------------------------------------------------------------------ */
 /*  Receiving engine — batch ingest from DJI Air 3S                     */
 /* ------------------------------------------------------------------ */
-const PIPELINE_STEPS = [
+const PIPELINE_STEPS_CONSTRUCTION = [
   { label: "Receiving imagery from DJI Air 3S", icon: Satellite },
   { label: "Extracting GPS + EXIF flight metadata", icon: Compass },
   { label: "Matching flight path to project boundary", icon: MapPin },
@@ -739,6 +1270,134 @@ const PIPELINE_STEPS = [
   { label: "Aligning to the prior capture", icon: SlidersHorizontal },
   { label: "Running change-detection analysis", icon: TrendingUp },
 ];
+
+const PIPELINE_STEPS_REAL_ESTATE = [
+  { label: "Receiving imagery from DJI Air 3S", icon: Satellite },
+  { label: "Extracting GPS + EXIF flight metadata", icon: Compass },
+  { label: "Matching flight path to parcel boundary", icon: MapPin },
+  { label: "Stitching orthomosaic composite", icon: Layers },
+  { label: "Analyzing lot features and surroundings", icon: TreePine },
+  { label: "Drafting MLS description", icon: ScrollText },
+];
+
+const TRADE_CATEGORIES = [
+  {
+    category: "Sitework and earthwork",
+    trades: [
+      "Surveying / layout", "Demolition", "Clearing and grubbing", "Excavation and grading",
+      "Erosion control", "Site utilities (storm, sanitary, water)", "Dewatering",
+      "Paving (asphalt and concrete)", "Landscaping and irrigation", "Fencing",
+    ],
+  },
+  {
+    category: "Foundations and structure",
+    trades: [
+      "Deep foundations (piles, caissons, piers)", "Shoring", "Concrete formwork",
+      "Rebar / reinforcing steel", "Concrete placement and finishing", "Precast concrete",
+      "Structural steel erection", "Miscellaneous metals (stairs, railings, embeds)",
+      "Masonry", "Carpentry / wood framing", "Crane and rigging",
+    ],
+  },
+  {
+    category: "Building envelope",
+    trades: [
+      "Roofing", "Waterproofing and damp-proofing", "Insulation", "Air and vapor barriers",
+      "Exterior cladding / siding / metal panels", "Curtain wall and storefront glazing",
+      "Windows and doors", "Sheet metal and flashing", "Caulking and sealants",
+    ],
+  },
+  {
+    category: "MEP (mechanical, electrical, plumbing)",
+    trades: [
+      "Plumbing", "HVAC / mechanical", "Sheet metal ductwork", "Pipefitting",
+      "Fire protection / sprinklers", "Electrical", "Low-voltage (data, telecom, AV)",
+      "Fire alarm", "Security and access control", "Controls / building automation",
+      "Test and balance (TAB)",
+    ],
+  },
+  {
+    category: "Interiors and finishes",
+    trades: [
+      "Metal stud framing", "Drywall and taping", "Acoustical ceilings",
+      "Painting and wall coverings", "Flooring (tile, carpet, resilient, epoxy)",
+      "Millwork and casework", "Doors, frames, and hardware",
+      "Specialties (toilet partitions, signage, lockers)", "Elevators and conveying systems",
+    ],
+  },
+  {
+    category: "Specialty and industrial",
+    trades: [
+      "Process piping", "Cleanroom construction", "Welding", "Insulation (mechanical/pipe)",
+      "Commissioning", "Equipment setting / millwrights", "Scaffolding",
+      "Fireproofing and firestopping",
+    ],
+  },
+  {
+    category: "Site support",
+    trades: [
+      "General labor and cleanup", "Traffic control / flagging",
+      "Temporary facilities (power, trailers, toilets)", "Material hauling and trucking", "Safety",
+    ],
+  },
+];
+
+function TradesEditor({ trades, onChange }) {
+  const [filter, setFilter] = useState("");
+  const toggle = (t) => {
+    onChange(trades.includes(t) ? trades.filter((x) => x !== t) : [...trades, t]);
+  };
+  const q = filter.trim().toLowerCase();
+  const visible = q
+    ? TRADE_CATEGORIES.map((c) => ({ ...c, trades: c.trades.filter((t) => t.toLowerCase().includes(q)) })).filter((c) => c.trades.length)
+    : TRADE_CATEGORIES;
+
+  return (
+    <div>
+      <input type="text" value={filter} onChange={(e) => setFilter(e.target.value)}
+        placeholder="Filter trades…"
+        className="w-full rounded-lg px-3 py-1.5 mb-3 font-body text-xs outline-none" style={inputStyle} />
+      <div className="max-h-72 overflow-y-auto pr-1 space-y-3">
+        {visible.map((c) => (
+          <div key={c.category}>
+            <div className="font-mono text-[9px] uppercase tracking-widest mb-1.5" style={{ color: C.faint }}>{c.category}</div>
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-1.5">
+              {c.trades.map((t) => (
+                <label key={t} className="flex items-center gap-2 cursor-pointer font-body text-xs" style={{ color: C.text }}>
+                  <input type="checkbox" checked={trades.includes(t)} onChange={() => toggle(t)} className="w-4 h-4 shrink-0 accent-blue-600" />
+                  {t}
+                </label>
+              ))}
+            </div>
+          </div>
+        ))}
+        {!visible.length && (
+          <div className="font-mono text-[11px]" style={{ color: C.faint }}>No trades match "{filter}"</div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/*  Media library — panoramas, video, and ortho exports per flight      */
+/* ------------------------------------------------------------------ */
+const MEDIA_TABS = [
+  { id: "still", label: "Stills", icon: SlidersHorizontal },
+  { id: "panorama", label: "Panoramas", icon: ImageIcon },
+  { id: "video", label: "Videos", icon: Video },
+  { id: "ortho", label: "Ortho", icon: Layers },
+];
+const EXTRA_MEDIA_TYPES = MEDIA_TABS.filter((t) => t.id !== "still");
+
+// The ortho tab reuses each week's primary capture (the pipeline already frames it as
+// "stitching orthomosaic composite"), plus any standalone ortho exports an admin attaches.
+function mediaForWeek(week, type) {
+  const extra = (week.media || []).filter((m) => m.type === type);
+  if (type === "ortho" && week.dataUrl) {
+    return [{ id: `ortho-primary-${week.n}`, type: "ortho", url: week.dataUrl, name: "Orthomosaic composite" }, ...extra];
+  }
+  return extra;
+}
 
 function metersToDeg(m) { return m / 111111; }
 
@@ -756,18 +1415,24 @@ function buildReceivedFile(file, index, seedBase) {
   };
 }
 
-function ReceivingEngine({ sites, onIngested, onOpenSite }) {
+function ReceivingEngine({ sites, onIngested, onIngestedListing, onOpenSite, onGoToAdmin }) {
   const [received, setReceived] = useState([]); // {id,file,name,dataUrl,alt,dLat,dLon,t}
   const [dragOver, setDragOver] = useState(false);
   const [detectedId, setDetectedId] = useState(null);
   const [siteId, setSiteId] = useState(null);
   const [confidence, setConfidence] = useState(null);
   const [stage, setStage] = useState(-1);
+  const [tradesOnSite, setTradesOnSite] = useState([]);
+  const [captureDate, setCaptureDate] = useState(() => new Date().toISOString().slice(0, 10));
   const timerRef = useRef(null);
+  const todayIso = new Date().toISOString().slice(0, 10);
 
   const site = sites.find((s) => s.id === (siteId || detectedId));
+  const isRealEstate = site?.mode === "realEstate";
+  const pipelineSteps = isRealEstate ? PIPELINE_STEPS_REAL_ESTATE : PIPELINE_STEPS_CONSTRUCTION;
 
   const handleFiles = (fileList) => {
+    if (!sites.length) return;
     const files = Array.from(fileList).filter((f) => f.type.startsWith("image/"));
     if (!files.length) return;
     const seedBase = "batch-" + Date.now();
@@ -789,7 +1454,10 @@ function ReceivingEngine({ sites, onIngested, onOpenSite }) {
     setStage(-1);
   };
 
-  const clearBatch = () => { setReceived([]); setDetectedId(null); setSiteId(null); setConfidence(null); setStage(-1); };
+  const clearBatch = () => {
+    setReceived([]); setDetectedId(null); setSiteId(null); setConfidence(null); setStage(-1);
+    setTradesOnSite([]); setCaptureDate(new Date().toISOString().slice(0, 10));
+  };
 
   const begin = () => {
     setStage(0);
@@ -797,19 +1465,34 @@ function ReceivingEngine({ sites, onIngested, onOpenSite }) {
     timerRef.current = setInterval(() => {
       s += 1;
       setStage(s);
-      if (s >= PIPELINE_STEPS.length) clearInterval(timerRef.current);
+      if (s >= pipelineSteps.length) clearInterval(timerRef.current);
     }, 650);
   };
 
   useEffect(() => () => clearInterval(timerRef.current), []);
 
-  const done = stage >= PIPELINE_STEPS.length;
+  const done = stage >= pipelineSteps.length;
   const hero = received[0];
 
   const finish = () => {
-    const weeks = site._weeks;
-    const nextN = weeks[weeks.length - 1].n + 1;
-    onIngested(site.id, { n: nextN, date: "New", real: true, dataUrl: hero.dataUrl, sourceCount: received.length });
+    const displayDate = formatShortDate(new Date(`${captureDate}T00:00:00`));
+    if (isRealEstate) {
+      const photos = received.map((r, i) => ({ id: `${site.id}-listing-${Date.now()}-${i}`, dataUrl: r.dataUrl }));
+      onIngestedListing(site.id, { photos, capturedDate: displayDate });
+    } else {
+      const photos = received.map((r, i) => ({ id: `${site.id}-cap-${Date.now()}-${i}`, dataUrl: r.dataUrl }));
+      onIngested(site.id, {
+        id: generateFlightId(site.id),
+        n: 0, // recomputed from capturedAt by renumberWeeksByDate in App()
+        date: displayDate,
+        capturedAt: captureDate,
+        real: true,
+        dataUrl: hero.dataUrl,
+        sourceCount: received.length,
+        trades: tradesOnSite,
+        photos,
+      });
+    }
     onOpenSite(site.id);
   };
 
@@ -826,12 +1509,25 @@ function ReceivingEngine({ sites, onIngested, onOpenSite }) {
         </p>
       </div>
 
-      {received.length === 0 && (
+      {sites.length === 0 ? (
+        <div className="rounded-xl p-10 flex flex-col items-center justify-center text-center gap-3"
+          style={{ background: C.panel, border: `1px dashed ${C.line}` }}>
+          <Settings size={22} color={C.faint} />
+          <div className="font-body text-sm" style={{ color: C.text }}>No projects set up yet</div>
+          <div className="font-mono text-[11px] max-w-xs" style={{ color: C.faint }}>
+            Create a project in Admin controls before receiving flight imagery for it.
+          </div>
+          <button onClick={onGoToAdmin} className="btn-modern mt-2 px-4 py-2 rounded-lg font-body text-xs font-medium"
+            style={{ background: C.cyan, color: "#FFFFFF" }}>
+            Go to Admin controls
+          </button>
+        </div>
+      ) : received.length === 0 && (
         <div onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
           onDragLeave={() => setDragOver(false)}
           onDrop={(e) => { e.preventDefault(); setDragOver(false); handleFiles(e.dataTransfer.files); }}
           className="rounded-xl p-10 flex flex-col items-center justify-center text-center gap-3 transition-colors"
-          style={{ background: C.panel, border: `2px dashed ${dragOver ? C.orange : C.line}` }}>
+          style={{ background: C.panel, border: `2px dashed ${dragOver ? C.cyan : C.line}` }}>
           <div className="w-14 h-14 rounded-full flex items-center justify-center" style={{ background: C.panel2 }}>
             <Plane size={22} color={C.cyan} />
           </div>
@@ -892,8 +1588,16 @@ function ReceivingEngine({ sites, onIngested, onOpenSite }) {
                 style={{ background: C.panel2, color: C.text, border: `1px solid ${C.line}` }}>
                 {sites.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
               </select>
+              <label className="font-mono text-[10px] uppercase tracking-widest block mt-3" style={{ color: C.faint }}>Capture date</label>
+              <input type="date" value={captureDate} max={todayIso}
+                onChange={(e) => setCaptureDate(e.target.value)}
+                className="w-full mt-1.5 rounded-lg px-3 py-2 font-body text-sm outline-none"
+                style={{ background: C.panel2, color: C.text, border: `1px solid ${C.line}` }} />
+              <div className="font-mono text-[10px] mt-1.5" style={{ color: C.faint }}>
+                Defaults to today — set an earlier date to backfill a past flight into its correct place in the history.
+              </div>
               <button onClick={begin} className="btn-modern w-full mt-4 py-3 rounded-lg font-body text-sm font-medium flex items-center justify-center gap-2"
-                style={{ background: C.orange, color: "#160C05", boxShadow: "0 8px 24px -8px rgba(255,93,46,0.45)" }}>
+                style={{ background: C.cyan, color: C.onAccent, boxShadow: "0 8px 24px -8px rgba(28,100,214,0.4)" }}>
                 <Upload size={15} /> Process batch
               </button>
             </div>
@@ -902,7 +1606,7 @@ function ReceivingEngine({ sites, onIngested, onOpenSite }) {
           {stage >= 0 && (
             <div className="fade-in-up rounded-xl p-5" style={{ background: C.panel, border: `1px solid ${C.line}` }}>
               <div className="space-y-3">
-                {PIPELINE_STEPS.map((step, i) => {
+                {pipelineSteps.map((step, i) => {
                   const isDone = i < stage, isActive = i === stage && !done;
                   const Icon = step.icon;
                   return (
@@ -921,13 +1625,22 @@ function ReceivingEngine({ sites, onIngested, onOpenSite }) {
                   <div className="flex items-center gap-2 mb-3 font-body text-sm" style={{ color: C.ok }}>
                     <CheckCircle2 size={15} /> Batch processed — orthomosaic ready for review
                   </div>
-                  <p className="font-mono text-[11px] mb-3" style={{ color: C.faint }}>
-                    Demo note: baseline imagery for existing weeks is simulated. In production the aligner registers
-                    every frame in the batch against the site's true prior capture before diffing.
+                  <p className="font-mono text-[11px] mb-4" style={{ color: C.faint }}>
+                    {isRealEstate
+                      ? "These photos become this listing's current aerial set, replacing any prior upload."
+                      : "The aligner registers every frame in this batch against the site's prior capture before diffing."}
                   </p>
+                  {!isRealEstate && (
+                    <div className="rounded-lg p-4 mb-4" style={{ background: C.panel2, border: `1px solid ${C.line}` }}>
+                      <div className="font-mono text-[10px] uppercase tracking-widest mb-3" style={{ color: C.faint }}>
+                        Trades on site this flight
+                      </div>
+                      <TradesEditor trades={tradesOnSite} onChange={setTradesOnSite} />
+                    </div>
+                  )}
                   <button onClick={finish} className="btn-modern w-full py-2.5 rounded-lg font-body text-sm font-medium"
-                    style={{ background: C.cyan, color: "#0A0E13" }}>
-                    Add to flight log &amp; compare
+                    style={{ background: C.cyan, color: C.onAccent }}>
+                    {isRealEstate ? "Save aerial photos" : "Add to flight log & compare"}
                   </button>
                 </div>
               )}
@@ -1014,7 +1727,7 @@ function QuickCompare() {
               ].map((t) => (
                 <button key={t.id} onClick={() => setMode(t.id)}
                   className="btn-modern flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-body"
-                  style={{ background: mode === t.id ? C.orange : C.panel2, color: mode === t.id ? "#160C05" : C.muted, fontWeight: mode === t.id ? 600 : 400 }}>
+                  style={{ background: mode === t.id ? C.cyan : C.panel2, color: mode === t.id ? C.onAccent : C.muted, fontWeight: mode === t.id ? 600 : 400 }}>
                   <t.icon size={13} /> {t.label}
                 </button>
               ))}
@@ -1056,40 +1769,57 @@ function QuickCompare() {
 const INK = { text: "#12161C", muted: "#5B6672", faint: "#93A0AD", line: "#E4E7EB", panel: "#F7F8FA" };
 
 function PrintableReport({ site, weekA, weekB, weeks }) {
+  const hasComparison = weekA.n !== weekB.n;
   const [imgA, setImgA] = useState(null);
   const [imgB, setImgB] = useState(null);
   const [merged, setMerged] = useState(null);
   const [pct, setPct] = useState(null);
+  const [allCaptures, setAllCaptures] = useState([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
     (async () => {
-      const [ca, cb] = await Promise.all([sceneCanvas(site, weekA), sceneCanvas(site, weekB)]);
-      const { maskUrl, percent } = diffCanvases(ca, cb);
-      const mergeCanvas = document.createElement("canvas");
-      mergeCanvas.width = W; mergeCanvas.height = H;
-      const mctx = mergeCanvas.getContext("2d");
-      mctx.drawImage(cb, 0, 0);
-      const maskImg = new Image();
-      await new Promise((res) => { maskImg.onload = res; maskImg.src = maskUrl; });
-      mctx.globalAlpha = 0.85;
-      mctx.drawImage(maskImg, 0, 0);
-      mctx.globalAlpha = 1;
+      let ca = null, cb, maskUrl = null, percent = null, mergeUrl = null;
+
+      if (hasComparison) {
+        [ca, cb] = await Promise.all([sceneCanvas(weekA), sceneCanvas(weekB)]);
+        const diff = diffCanvases(ca, cb);
+        maskUrl = diff.maskUrl; percent = diff.percent;
+        const mergeCanvas = document.createElement("canvas");
+        mergeCanvas.width = W; mergeCanvas.height = H;
+        const mctx = mergeCanvas.getContext("2d");
+        mctx.drawImage(cb, 0, 0);
+        const maskImg = new Image();
+        await new Promise((res) => { maskImg.onload = res; maskImg.src = maskUrl; });
+        mctx.globalAlpha = 0.85;
+        mctx.drawImage(maskImg, 0, 0);
+        mctx.globalAlpha = 1;
+        mergeUrl = mergeCanvas.toDataURL();
+      } else {
+        cb = await sceneCanvas(weekB);
+      }
+
+      const captures = await Promise.all(weeks.map(async (w) => {
+        const c = hasComparison && w.n === weekA.n ? ca : w.n === weekB.n ? cb : await sceneCanvas(w);
+        return { n: w.n, date: w.date, trades: w.trades || [], note: w.note || "", url: c.toDataURL() };
+      }));
+
       if (cancelled) return;
-      setImgA(ca.toDataURL());
+      setImgA(hasComparison ? ca.toDataURL() : null);
       setImgB(cb.toDataURL());
-      setMerged(mergeCanvas.toDataURL());
+      setMerged(mergeUrl);
       setPct(percent);
+      setAllCaptures(captures);
       setLoading(false);
     })();
     return () => { cancelled = true; };
-  }, [site, weekA, weekB]);
+  }, [site, weekA, weekB, weeks, hasComparison]);
 
   const today = new Date().toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" });
 
-  if (loading || !imgA) {
+  if (loading || !imgB) {
     return (
       <div className="rounded-xl p-10 flex items-center justify-center gap-2 font-mono text-xs"
         style={{ background: C.panel, border: `1px solid ${C.line}`, color: C.muted }}>
@@ -1107,7 +1837,7 @@ function PrintableReport({ site, weekA, weekB, weeks }) {
         </p>
         <button onClick={() => window.print()}
           className="btn-modern flex items-center gap-2 px-4 py-2.5 rounded-lg font-body text-sm font-medium shrink-0"
-          style={{ background: C.orange, color: "#160C05", boxShadow: "0 8px 24px -8px rgba(255,93,46,0.45)" }}>
+          style={{ background: C.cyan, color: C.onAccent, boxShadow: "0 8px 24px -8px rgba(28,100,214,0.4)" }}>
           <Download size={15} /> Download PDF
         </button>
       </div>
@@ -1116,12 +1846,13 @@ function PrintableReport({ site, weekA, weekB, weeks }) {
         <div className="p-8 md:p-10">
           <div className="flex items-center justify-between mb-8">
             <div className="flex items-center gap-2">
-              <div className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ background: C.orange }}>
-                <Crosshair size={14} color="#160C05" />
-              </div>
+              <Logo size={26} />
               <span className="font-display text-sm font-semibold" style={{ color: INK.text }}>Wisconsin Aerial</span>
             </div>
-            <span className="font-mono text-[9px] tracking-widest" style={{ color: INK.faint }}>SITE PROGRESS REPORT</span>
+            <div className="text-right">
+              <div className="font-mono text-[9px] tracking-widest" style={{ color: INK.faint }}>SITE PROGRESS REPORT</div>
+              <div className="font-mono text-[8px] tracking-widest mt-0.5" style={{ color: C.cyan }}>PRECISION WEEK-OVER-WEEK DOCUMENTATION</div>
+            </div>
           </div>
 
           <div className="pb-6 mb-6" style={{ borderBottom: `1px solid ${INK.line}` }}>
@@ -1133,12 +1864,16 @@ function PrintableReport({ site, weekA, weekB, weeks }) {
             <div className="font-mono text-[10px] mt-2" style={{ color: INK.faint }}>Report generated {today}</div>
           </div>
 
-          <div className="grid grid-cols-4 gap-3 mb-8">
+          <div className="grid grid-cols-4 gap-3 mb-6">
             {[
               { label: "Total flights", value: weeks.length },
               { label: "Tracking since", value: weeks[0].date },
-              { label: "Comparing", value: `W${weekA.n} → W${weekB.n}` },
-              { label: "Area changed", value: `${pct.toFixed(1)}%`, accent: true },
+              hasComparison
+                ? { label: "Comparing", value: `W${weekA.n} → W${weekB.n}` }
+                : { label: "Latest capture", value: `W${weekB.n} · ${weekB.date}` },
+              hasComparison
+                ? { label: "Area changed", value: `${pct.toFixed(1)}%`, accent: true }
+                : { label: "Status", value: "Baseline flight" },
             ].map((s) => (
               <div key={s.label} className="rounded-lg p-3" style={{ background: INK.panel, border: `1px solid ${INK.line}` }}>
                 <div className="font-mono text-[8.5px] uppercase tracking-widest mb-1" style={{ color: INK.faint }}>{s.label}</div>
@@ -1147,33 +1882,63 @@ function PrintableReport({ site, weekA, weekB, weeks }) {
             ))}
           </div>
 
+          <div className="rounded-lg p-4 mb-8" style={{ background: INK.panel, border: `1px solid ${INK.line}` }}>
+            <div className="font-mono text-[8.5px] uppercase tracking-widest mb-1.5" style={{ color: INK.faint }}>Site activity summary — W{weekB.n} ({weekB.date})</div>
+            <p className="font-body text-xs leading-relaxed" style={{ color: INK.text }}>
+              {weekB.note || generateActivityNarrative(site, weekB)}
+            </p>
+          </div>
+
+          {hasComparison ? (
+            <>
+              <div className="font-display text-sm font-semibold mb-3" style={{ color: INK.text }}>
+                Capture comparison — W{weekA.n} ({weekA.date}) to W{weekB.n} ({weekB.date})
+              </div>
+              <div className="grid grid-cols-2 gap-4 mb-6">
+                <div>
+                  <img src={imgA} className="w-full rounded-lg" style={{ border: `1px solid ${INK.line}` }} />
+                  <div className="font-mono text-[10px] mt-1.5" style={{ color: INK.muted }}>Before · W{weekA.n} · {weekA.date}</div>
+                </div>
+                <div>
+                  <img src={imgB} className="w-full rounded-lg" style={{ border: `1px solid ${INK.line}` }} />
+                  <div className="font-mono text-[10px] mt-1.5" style={{ color: INK.muted }}>After · W{weekB.n} · {weekB.date}</div>
+                </div>
+              </div>
+
+              <div className="font-display text-sm font-semibold mb-3" style={{ color: INK.text }}>Change highlight</div>
+              <img src={merged} className="w-full rounded-lg mb-1.5" style={{ border: `1px solid ${INK.line}` }} />
+              <div className="font-mono text-[10px] mb-8" style={{ color: INK.muted }}>
+                Orange-highlighted regions mark automated, pixel-level change between the two captures above — {pct.toFixed(1)}% of the visible site surface.
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="font-display text-sm font-semibold mb-3" style={{ color: INK.text }}>
+                Latest capture — W{weekB.n} ({weekB.date})
+              </div>
+              <img src={imgB} className="w-full rounded-lg mb-1.5" style={{ border: `1px solid ${INK.line}` }} />
+              <div className="font-mono text-[10px] mb-8" style={{ color: INK.muted }}>
+                This is the only capture on record for the selection above, so there's no prior flight to compare it
+                against yet — once a second flight is logged, this report will include a week-over-week change
+                comparison automatically.
+              </div>
+            </>
+          )}
+
           <div className="font-display text-sm font-semibold mb-3" style={{ color: INK.text }}>
-            Capture comparison — W{weekA.n} ({weekA.date}) to W{weekB.n} ({weekB.date})
+            All flight captures ({allCaptures.length})
           </div>
-          <div className="grid grid-cols-2 gap-4 mb-6">
-            <div>
-              <img src={imgA} className="w-full rounded-lg" style={{ border: `1px solid ${INK.line}` }} />
-              <div className="font-mono text-[10px] mt-1.5" style={{ color: INK.muted }}>Before · W{weekA.n} · {weekA.date}</div>
-            </div>
-            <div>
-              <img src={imgB} className="w-full rounded-lg" style={{ border: `1px solid ${INK.line}` }} />
-              <div className="font-mono text-[10px] mt-1.5" style={{ color: INK.muted }}>After · W{weekB.n} · {weekB.date}</div>
-            </div>
-          </div>
-
-          <div className="font-display text-sm font-semibold mb-3" style={{ color: INK.text }}>Change highlight</div>
-          <img src={merged} className="w-full rounded-lg mb-1.5" style={{ border: `1px solid ${INK.line}` }} />
-          <div className="font-mono text-[10px] mb-8" style={{ color: INK.muted }}>
-            Orange-highlighted regions mark automated, pixel-level change between the two captures above — {pct.toFixed(1)}% of the visible site surface.
-          </div>
-
-          <div className="font-display text-sm font-semibold mb-3" style={{ color: INK.text }}>Flight history</div>
-          <div className="rounded-lg overflow-hidden mb-8" style={{ border: `1px solid ${INK.line}` }}>
-            {weeks.map((w, i) => (
-              <div key={w.n} className="flex items-center justify-between px-3 py-2 font-mono text-[11px]"
-                style={{ background: i % 2 ? "#FFFFFF" : INK.panel, color: INK.muted, borderTop: i ? `1px solid ${INK.line}` : "none" }}>
-                <span style={{ color: INK.text }}>Flight W{w.n}</span>
-                <span>{w.date}{w.real ? " · client-supplied capture" : ""}</span>
+          <div className="grid grid-cols-3 gap-3 mb-8">
+            {allCaptures.map((c) => (
+              <div key={c.n}>
+                <img src={c.url} className="w-full rounded-lg" style={{ border: `1px solid ${INK.line}`, aspectRatio: `${W}/${H}`, objectFit: "cover" }} />
+                <div className="font-mono text-[9.5px] mt-1.5" style={{ color: INK.text }}>W{c.n} · {c.date}</div>
+                <div className="font-mono text-[8.5px] mt-0.5" style={{ color: INK.muted }}>
+                  {c.trades.length ? c.trades.join(", ") : "No trades logged"}
+                </div>
+                {c.note && (
+                  <div className="font-body text-[8.5px] mt-1 leading-snug" style={{ color: INK.muted }}>{c.note}</div>
+                )}
               </div>
             ))}
           </div>
@@ -1205,17 +1970,95 @@ function ClientStat({ icon: Icon, label, value, tone = "muted" }) {
   );
 }
 
-function ClientPortal({ site, isPreview, onExitPreview, initialTab = "interactive" }) {
+function RealEstateReport({ site }) {
+  const listing = site.listing || { photos: [], capturedDate: null, description: "" };
+  const today = new Date().toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" });
+
+  return (
+    <div>
+      <div className="no-print flex items-center justify-between mb-4 flex-wrap gap-3">
+        <p className="font-mono text-[11px]" style={{ color: C.faint }}>
+          This is exactly how the PDF will lay out. "Download PDF" opens your browser's print dialog — choose
+          "Save as PDF" as the destination.
+        </p>
+        <button onClick={() => window.print()}
+          className="btn-modern flex items-center gap-2 px-4 py-2.5 rounded-lg font-body text-sm font-medium shrink-0"
+          style={{ background: C.cyan, color: C.onAccent, boxShadow: "0 8px 24px -8px rgba(28,100,214,0.4)" }}>
+          <Download size={15} /> Download PDF
+        </button>
+      </div>
+
+      <div id="printable-report" className="rounded-xl overflow-hidden" style={{ background: "#FFFFFF" }}>
+        <div className="p-8 md:p-10">
+          <div className="flex items-center justify-between mb-8">
+            <div className="flex items-center gap-2">
+              <Logo size={26} />
+              <span className="font-display text-sm font-semibold" style={{ color: INK.text }}>Wisconsin Aerial</span>
+            </div>
+            <div className="text-right">
+              <div className="font-mono text-[9px] tracking-widest" style={{ color: INK.faint }}>AERIAL LISTING PACKAGE</div>
+              <div className="font-mono text-[8px] tracking-widest mt-0.5" style={{ color: C.cyan }}>DRAFT — VERIFY BEFORE PUBLISHING</div>
+            </div>
+          </div>
+
+          <div className="pb-6 mb-6" style={{ borderBottom: `1px solid ${INK.line}` }}>
+            <div className="font-mono text-[10px] uppercase tracking-widest mb-2" style={{ color: INK.faint }}>
+              Prepared for {site.client}
+            </div>
+            <h1 className="font-display text-2xl font-semibold mb-1" style={{ color: INK.text }}>{site.name}</h1>
+            <div className="font-mono text-xs" style={{ color: INK.muted }}>{site.address}</div>
+            <div className="font-mono text-[10px] mt-2" style={{ color: INK.faint }}>
+              Report generated {today}{listing.capturedDate ? ` · Aerial capture ${listing.capturedDate}` : ""}
+            </div>
+          </div>
+
+          <div className="font-display text-sm font-semibold mb-3" style={{ color: INK.text }}>Aerial photos</div>
+          {listing.photos.length ? (
+            <div className="grid grid-cols-3 gap-3 mb-8">
+              {listing.photos.map((p) => (
+                <img key={p.id} src={p.dataUrl} className="w-full rounded-lg" style={{ border: `1px solid ${INK.line}`, aspectRatio: `${W}/${H}`, objectFit: "cover" }} />
+              ))}
+            </div>
+          ) : (
+            <div className="rounded-lg p-6 mb-8 text-center font-mono text-xs" style={{ background: INK.panel, color: INK.faint, border: `1px solid ${INK.line}` }}>
+              No aerial photos uploaded yet.
+            </div>
+          )}
+
+          <div className="font-display text-sm font-semibold mb-3" style={{ color: INK.text }}>Listing description</div>
+          <p className="font-body text-sm leading-relaxed mb-2" style={{ color: INK.text }}>
+            {listing.description || "No description drafted yet."}
+          </p>
+          <p className="font-mono text-[9.5px] mb-8" style={{ color: INK.faint }}>
+            Draft only — verify all lot, access, and proximity details before publishing to MLS.
+          </p>
+
+          <div className="pt-5 flex items-center justify-between flex-wrap gap-2" style={{ borderTop: `1px solid ${INK.line}` }}>
+            <span className="font-mono text-[9.5px]" style={{ color: INK.faint }}>
+              Flown &amp; processed by Wisconsin Aerial · imagery captured via DJI Air 3S
+            </span>
+            <span className="font-mono text-[9.5px]" style={{ color: INK.faint }}>Aerial reference only, not a survey or appraisal</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ClientPortal({ site, mode, onExitPreview, initialTab = "interactive" }) {
   const weeks = site._weeks;
-  const [selected, setSelected] = useState([weeks[weeks.length - 2].n, weeks[weeks.length - 1].n]);
+  const [selected, setSelected] = useState(() =>
+    weeks.length >= 2 ? [weeks[weeks.length - 2].n, weeks[weeks.length - 1].n] : weeks.length === 1 ? [weeks[0].n] : []
+  );
   const [latestPct, setLatestPct] = useState(null);
   const [tab, setTab] = useState(initialTab);
 
   useEffect(() => {
+    if (weeks.length < 2) return;
     let cancelled = false;
     (async () => {
       const a = weeks[weeks.length - 2], b = weeks[weeks.length - 1];
-      const [ca, cb] = await Promise.all([sceneCanvas(site, a), sceneCanvas(site, b)]);
+      const [ca, cb] = await Promise.all([sceneCanvas(a), sceneCanvas(b)]);
       if (!cancelled) setLatestPct(diffCanvases(ca, cb).percent);
     })();
     return () => { cancelled = true; };
@@ -1233,19 +2076,21 @@ function ClientPortal({ site, isPreview, onExitPreview, initialTab = "interactiv
   const weekB = weeks.find((w) => w.n === (sorted[1] ?? sorted[0]));
   const Icon = site.icon;
   const first = weeks[0], last = weeks[weeks.length - 1];
+  const canDiff = weeks.length >= 2;
 
   return (
     <div className="min-h-screen font-body" style={{ background: C.bg }}>
       <style>{FONTS}</style>
 
-      {isPreview && (
+      {(mode === "preview" || mode === "client") && (
         <div className="no-print sticky top-0 z-20 flex items-center justify-between gap-3 px-4 py-2.5 flex-wrap"
-          style={{ background: C.orange, color: "#160C05" }}>
+          style={{ background: mode === "preview" ? C.orange : C.cyan, color: mode === "preview" ? "#160C05" : C.onAccent }}>
           <div className="flex items-center gap-2 font-body text-xs font-medium">
-            <Compass size={13} /> Admin preview — this is exactly what {site.client} receives
+            <Compass size={13} />
+            {mode === "preview" ? <>Admin preview — this is exactly what {site.client} receives</> : <>Client access — {site.name}</>}
           </div>
           <button onClick={onExitPreview} className="flex items-center gap-1.5 font-mono text-[11px] font-semibold">
-            <LogOut size={12} /> Exit preview
+            <LogOut size={12} /> {mode === "preview" ? "Exit preview" : "Sign out"}
           </button>
         </div>
       )}
@@ -1253,12 +2098,11 @@ function ClientPortal({ site, isPreview, onExitPreview, initialTab = "interactiv
       {/* client header */}
       <header className="no-print px-5 md:px-10 pt-8 pb-6" style={{ borderBottom: `1px solid ${C.line}` }}>
         <div className="max-w-4xl mx-auto">
-          <div className="flex items-center gap-2 mb-6">
-            <div className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ background: C.orange }}>
-              <Crosshair size={14} color="#160C05" />
-            </div>
+          <div className="flex items-center gap-2 mb-6 flex-wrap">
+            <Logo size={30} />
             <span className="font-display text-sm font-semibold" style={{ color: C.text }}>Wisconsin Aerial</span>
-            <span className="font-mono text-[9px] tracking-widest ml-1" style={{ color: C.faint }}>CLIENT REPORT</span>
+            <span className="font-mono text-[9px] tracking-widest ml-1" style={{ color: C.faint }}>CLIENT DASHBOARD</span>
+            <span className="font-mono text-[9px] tracking-widest" style={{ color: C.cyan }}>· PRECISION WEEK-OVER-WEEK DOCUMENTATION</span>
           </div>
           <div className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-widest mb-2" style={{ color: C.faint }}>
             Prepared for {site.client}
@@ -1274,52 +2118,584 @@ function ClientPortal({ site, isPreview, onExitPreview, initialTab = "interactiv
       </header>
 
       <main className="px-5 md:px-10 py-8 max-w-4xl mx-auto">
+        {site.mode === "realEstate" ? (
+          <>
+            <div className="no-print grid grid-cols-2 md:grid-cols-3 gap-3 mb-8">
+              <ClientStat icon={ImageIcon} label="Aerial photos" value={(site.listing?.photos || []).length} />
+              <ClientStat icon={Clock} label="Captured" value={site.listing?.capturedDate || "—"} />
+              <ClientStat icon={Building2} label="Property type" value={site.type || "—"} />
+            </div>
+
+            <div className="no-print flex items-center gap-2 mb-5 rounded-lg p-1 w-fit" style={{ background: C.panel2, border: `1px solid ${C.line}` }}>
+              {[
+                { id: "interactive", label: "Listing overview", icon: ImageIcon },
+                { id: "pdf", label: "PDF report", icon: FileText },
+              ].map((t) => (
+                <button key={t.id} onClick={() => setTab(t.id)}
+                  className="btn-modern flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-body"
+                  style={{ background: tab === t.id ? C.cyan : "transparent", color: tab === t.id ? "#FFFFFF" : C.muted, fontWeight: tab === t.id ? 600 : 400 }}>
+                  <t.icon size={13} /> {t.label}
+                </button>
+              ))}
+            </div>
+
+            {tab === "interactive" ? (
+              !(site.listing?.photos || []).length ? (
+                <div className="no-print rounded-xl p-10 text-center font-body text-sm flex flex-col items-center gap-2" style={{ background: C.panel, border: `1px solid ${C.line}`, color: C.muted }}>
+                  <Satellite size={20} color={C.faint} />
+                  No aerial photos uploaded yet for this listing — check back soon.
+                </div>
+              ) : (
+                <div>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 mb-6">
+                    {site.listing.photos.map((p) => (
+                      <img key={p.id} src={p.dataUrl} className="w-full rounded-lg object-cover" style={{ border: `1px solid ${C.line}`, aspectRatio: `${W}/${H}` }} />
+                    ))}
+                  </div>
+                  <div className="rounded-xl p-4" style={{ background: C.panel, border: `1px solid ${C.line}` }}>
+                    <h3 className="font-display text-sm font-semibold mb-2" style={{ color: C.text }}>Listing description</h3>
+                    <p className="font-body text-sm leading-relaxed" style={{ color: C.muted }}>
+                      {site.listing?.description || "No description drafted yet."}
+                    </p>
+                  </div>
+                </div>
+              )
+            ) : (
+              <RealEstateReport site={site} />
+            )}
+          </>
+        ) : (
+          <>
         <div className="no-print grid grid-cols-2 md:grid-cols-4 gap-3 mb-8">
           <ClientStat icon={Plane} label="Total flights" value={weeks.length} />
-          <ClientStat icon={Clock} label="Tracking since" value={first.date} />
-          <ClientStat icon={Calendar} label="Latest capture" value={last.date} />
+          <ClientStat icon={Clock} label="Tracking since" value={first?.date ?? "—"} />
+          <ClientStat icon={Calendar} label="Latest capture" value={last?.date ?? "—"} />
           <ClientStat icon={TrendingUp} label="Change, last flight" tone="orange"
-            value={latestPct === null ? "…" : `${latestPct.toFixed(1)}%`} />
+            value={!canDiff ? "—" : latestPct === null ? "…" : `${latestPct.toFixed(1)}%`} />
         </div>
 
-        <div className="no-print mb-3 flex items-center gap-2">
-          <ChevronDown size={13} color={C.faint} />
-          <h2 className="font-display text-base font-semibold" style={{ color: C.text }}>Flight history</h2>
-        </div>
-        <div className="no-print mb-6">
-          <FlightLogStrip weeks={weeks} selected={selected} onToggle={toggle} />
-        </div>
-
-        <div className="no-print flex items-center gap-2 mb-5 rounded-lg p-1 w-fit" style={{ background: C.panel2, border: `1px solid ${C.line}` }}>
-          {[
-            { id: "interactive", label: "Interactive report", icon: SlidersHorizontal },
-            { id: "pdf", label: "PDF report", icon: FileText },
-          ].map((t) => (
-            <button key={t.id} onClick={() => setTab(t.id)}
-              className="btn-modern flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-body"
-              style={{ background: tab === t.id ? C.orange : "transparent", color: tab === t.id ? "#160C05" : C.muted, fontWeight: tab === t.id ? 600 : 400 }}>
-              <t.icon size={13} /> {t.label}
-            </button>
-          ))}
-        </div>
-
-        {selected.length < 2 ? (
-          <div className="no-print rounded-xl p-8 text-center font-body text-sm" style={{ background: C.panel, border: `1px solid ${C.line}`, color: C.muted }}>
-            Select one more capture above to compare.
+        {weeks.length === 0 ? (
+          <div className="no-print rounded-xl p-10 text-center font-body text-sm flex flex-col items-center gap-2" style={{ background: C.panel, border: `1px solid ${C.line}`, color: C.muted }}>
+            <Satellite size={20} color={C.faint} />
+            Your project pilot hasn't logged any flights yet — check back soon.
           </div>
-        ) : tab === "interactive" ? (
-          <CompareWorkspace site={site} weekA={weekA} weekB={weekB} />
         ) : (
-          <PrintableReport site={site} weekA={weekA} weekB={weekB} weeks={weeks} />
+          <>
+            <div className="no-print mb-3 flex items-center gap-2">
+              <ChevronDown size={13} color={C.faint} />
+              <h2 className="font-display text-base font-semibold" style={{ color: C.text }}>Flight history</h2>
+            </div>
+            <div className="no-print mb-6">
+              <FlightLogStrip weeks={weeks} selected={selected} onToggle={toggle} />
+            </div>
+
+            <div className="no-print flex items-center gap-2 mb-5 rounded-lg p-1 w-fit" style={{ background: C.panel2, border: `1px solid ${C.line}` }}>
+              {[
+                { id: "interactive", label: "Interactive report", icon: SlidersHorizontal },
+                { id: "pdf", label: "PDF report", icon: FileText },
+              ].map((t) => (
+                <button key={t.id} onClick={() => setTab(t.id)}
+                  className="btn-modern flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-body"
+                  style={{ background: tab === t.id ? C.cyan : "transparent", color: tab === t.id ? "#FFFFFF" : C.muted, fontWeight: tab === t.id ? 600 : 400 }}>
+                  <t.icon size={13} /> {t.label}
+                </button>
+              ))}
+            </div>
+
+            {tab === "interactive" && selected.length < 2 ? (
+              <div className="no-print rounded-xl p-8 text-center font-body text-sm" style={{ background: C.panel, border: `1px solid ${C.line}`, color: C.muted }}>
+                {weeks.length === 1 ? "Only one capture so far — comparisons will appear after the next flight." : "Select one more capture above to compare."}
+              </div>
+            ) : tab === "interactive" ? (
+              <MediaWorkspace site={site} weekA={weekA} weekB={weekB} />
+            ) : (
+              <PrintableReport site={site} weekA={weekA} weekB={weekB} weeks={weeks} />
+            )}
+
+            {tab === "interactive" && (
+              <div className="mt-8">
+                <div className="flex items-center gap-2 mb-3">
+                  <ScrollText size={15} color={C.cyan} />
+                  <h2 className="font-display text-base font-semibold" style={{ color: C.text }}>Site activity log</h2>
+                </div>
+                <div className="space-y-2">
+                  {[...weeks].reverse().map((w) => (
+                    <div key={w.n} className="rounded-lg p-3" style={{ background: C.panel, border: `1px solid ${C.line}` }}>
+                      <div className="flex items-center justify-between gap-2 mb-1.5">
+                        <span className="font-mono text-xs" style={{ color: C.text }}>W{w.n} · {w.date}</span>
+                        <div className="flex flex-wrap gap-1.5 justify-end">
+                          {(w.trades || []).map((t) => <Badge key={t} tone="cyan">{t}</Badge>)}
+                        </div>
+                      </div>
+                      <p className="font-body text-xs leading-relaxed" style={{ color: w.note ? C.muted : C.faint }}>
+                        {w.note || "No activity narrative recorded for this flight."}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </>
+        )}
+          </>
         )}
 
         <footer className="no-print mt-12 pt-6 flex items-center justify-between flex-wrap gap-2" style={{ borderTop: `1px solid ${C.line}` }}>
           <span className="font-mono text-[10px]" style={{ color: C.faint }}>
             Flown &amp; processed by Wisconsin Aerial · questions go to your project pilot
           </span>
-          <span className="font-mono text-[10px]" style={{ color: C.faint }}>Report generated {last.date}</span>
+          <span className="font-mono text-[10px]" style={{ color: C.faint }}>
+            Report generated {site.mode === "realEstate" ? (site.listing?.capturedDate ?? "—") : (last?.date ?? "—")}
+          </span>
         </footer>
       </main>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/*  Access gate — admin sign-in vs client access code                   */
+/* ------------------------------------------------------------------ */
+// Demo-grade check only: there is no backend, so this can't be a real secret.
+const ADMIN_PASSCODE = "AMDG";
+
+function AccessGate({ sites, supabaseMode, onAdminLogin, onClientAccess }) {
+  const [mode, setMode] = useState("choose");
+  const [passcode, setPasscode] = useState("");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [code, setCode] = useState("");
+  const [showPass, setShowPass] = useState(false);
+  const [error, setError] = useState(null);
+  const [busy, setBusy] = useState(false);
+
+  const submitAdmin = async (e) => {
+    e.preventDefault();
+    if (!supabaseMode) {
+      if (passcode.trim() === ADMIN_PASSCODE) { onAdminLogin(); return; }
+      setError("Incorrect passcode.");
+      return;
+    }
+    setBusy(true); setError(null);
+    try {
+      await signInOperator(email.trim(), password);
+      onAdminLogin();
+    } catch (err) {
+      setError(err.message || "Sign-in failed.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const submitClient = async (e) => {
+    e.preventDefault();
+    if (!supabaseMode) {
+      const match = sites.find((s) => s.accessCode.toLowerCase() === code.trim().toLowerCase());
+      if (!match) { setError("That access code doesn't match any project."); return; }
+      if (!match.clientAccessEnabled) { setError("Client access for this project has been disabled by the site administrator."); return; }
+      onClientAccess(match.id, match, code.trim());
+      return;
+    }
+    setBusy(true); setError(null);
+    try {
+      const match = await db.getSiteByAccessCode(code.trim());
+      if (!match) { setError("That access code doesn't match any project, or client access has been disabled."); return; }
+      onClientAccess(match.id, match, code.trim());
+    } catch (err) {
+      setError(err.message || "Couldn't look up that project.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="min-h-screen flex items-center justify-center font-body p-5" style={{ background: C.bg }}>
+      <style>{FONTS}</style>
+      <div className="ambient-glow pointer-events-none fixed -top-40 -left-32 w-[560px] h-[560px] rounded-full"
+        style={{ background: "radial-gradient(circle, rgba(28,100,214,0.14), transparent 70%)", filter: "blur(10px)", zIndex: 0 }} />
+      <div className="ambient-glow pointer-events-none fixed -bottom-52 -right-40 w-[620px] h-[620px] rounded-full"
+        style={{ background: "radial-gradient(circle, rgba(126,193,250,0.20), transparent 70%)", filter: "blur(10px)", zIndex: 0, animationDelay: "-7s" }} />
+
+      <div className="fade-in-up relative z-10 w-full max-w-sm rounded-2xl p-7"
+        style={{ background: C.panel, border: `1px solid ${C.line}`, boxShadow: "0 24px 60px -24px rgba(18,24,38,0.25)" }}>
+        <div className="flex items-center gap-2 mb-6 justify-center">
+          <Logo size={34} />
+          <div>
+            <div className="font-display text-sm font-semibold leading-none" style={{ color: C.text }}>Wisconsin</div>
+            <div className="font-mono text-[9px] tracking-widest" style={{ color: C.faint }}>AERIAL</div>
+          </div>
+        </div>
+
+        {mode === "choose" && (
+          <div className="space-y-2.5">
+            <button onClick={() => { setMode("admin"); setError(null); }}
+              className="btn-modern w-full flex items-center gap-3 px-4 py-3 rounded-xl font-body text-sm"
+              style={{ background: C.panel2, border: `1px solid ${C.line}`, color: C.text }}>
+              <UserCog size={16} color={C.cyan} /> Admin sign-in
+            </button>
+            <button onClick={() => { setMode("client"); setError(null); }}
+              className="btn-modern w-full flex items-center gap-3 px-4 py-3 rounded-xl font-body text-sm"
+              style={{ background: C.panel2, border: `1px solid ${C.line}`, color: C.text }}>
+              <KeyRound size={16} color={C.cyan} /> I have a client access code
+            </button>
+          </div>
+        )}
+
+        {mode === "admin" && (
+          <form onSubmit={submitAdmin} className="space-y-3">
+            {supabaseMode ? (
+              <>
+                <label className="font-mono text-[10px] uppercase tracking-widest" style={{ color: C.faint }}>Operator email</label>
+                <div className="relative">
+                  <Mail size={14} color={C.faint} className="absolute left-3 top-1/2 -translate-y-1/2" />
+                  <input autoFocus type="email" value={email}
+                    onChange={(e) => { setEmail(e.target.value); setError(null); }}
+                    className="w-full rounded-lg pl-9 pr-3 py-2.5 font-body text-sm outline-none"
+                    style={{ background: C.panel2, color: C.text, border: `1px solid ${C.line}` }} />
+                </div>
+                <label className="font-mono text-[10px] uppercase tracking-widest" style={{ color: C.faint }}>Password</label>
+                <div className="relative">
+                  <Lock size={14} color={C.faint} className="absolute left-3 top-1/2 -translate-y-1/2" />
+                  <input type={showPass ? "text" : "password"} value={password}
+                    onChange={(e) => { setPassword(e.target.value); setError(null); }}
+                    className="w-full rounded-lg pl-9 pr-9 py-2.5 font-body text-sm outline-none"
+                    style={{ background: C.panel2, color: C.text, border: `1px solid ${C.line}` }} />
+                  <button type="button" onClick={() => setShowPass((v) => !v)} className="absolute right-3 top-1/2 -translate-y-1/2">
+                    {showPass ? <EyeOff size={14} color={C.faint} /> : <Eye size={14} color={C.faint} />}
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                <label className="font-mono text-[10px] uppercase tracking-widest" style={{ color: C.faint }}>Admin passcode</label>
+                <div className="relative">
+                  <Lock size={14} color={C.faint} className="absolute left-3 top-1/2 -translate-y-1/2" />
+                  <input autoFocus type={showPass ? "text" : "password"} value={passcode}
+                    onChange={(e) => { setPasscode(e.target.value); setError(null); }}
+                    className="w-full rounded-lg pl-9 pr-9 py-2.5 font-body text-sm outline-none"
+                    style={{ background: C.panel2, color: C.text, border: `1px solid ${C.line}` }} />
+                  <button type="button" onClick={() => setShowPass((v) => !v)} className="absolute right-3 top-1/2 -translate-y-1/2">
+                    {showPass ? <EyeOff size={14} color={C.faint} /> : <Eye size={14} color={C.faint} />}
+                  </button>
+                </div>
+              </>
+            )}
+            {error && (
+              <div className="flex items-center gap-1.5 font-body text-xs" style={{ color: C.orange }}>
+                <AlertCircle size={13} /> {error}
+              </div>
+            )}
+            <button type="submit" disabled={busy} className="btn-modern w-full py-2.5 rounded-lg font-body text-sm font-medium disabled:opacity-60"
+              style={{ background: C.cyan, color: C.onAccent, boxShadow: "0 8px 24px -8px rgba(28,100,214,0.4)" }}>
+              {busy ? "Signing in…" : "Sign in"}
+            </button>
+            <button type="button" onClick={() => { setMode("choose"); setError(null); }}
+              className="w-full font-mono text-[11px]" style={{ color: C.faint }}>
+              Back
+            </button>
+          </form>
+        )}
+
+        {mode === "client" && (
+          <form onSubmit={submitClient} className="space-y-3">
+            <label className="font-mono text-[10px] uppercase tracking-widest" style={{ color: C.faint }}>Project access code</label>
+            <div className="relative">
+              <KeyRound size={14} color={C.faint} className="absolute left-3 top-1/2 -translate-y-1/2" />
+              <input autoFocus value={code}
+                onChange={(e) => { setCode(e.target.value); setError(null); }}
+                placeholder="e.g. 4F9K2C"
+                className="w-full rounded-lg pl-9 pr-3 py-2.5 font-mono text-sm tracking-widest uppercase outline-none"
+                style={{ background: C.panel2, color: C.text, border: `1px solid ${C.line}` }} />
+            </div>
+            {error && (
+              <div className="flex items-center gap-1.5 font-body text-xs" style={{ color: C.orange }}>
+                <AlertCircle size={13} /> {error}
+              </div>
+            )}
+            <button type="submit" disabled={busy} className="btn-modern w-full py-2.5 rounded-lg font-body text-sm font-medium disabled:opacity-60"
+              style={{ background: C.cyan, color: C.onAccent, boxShadow: "0 8px 24px -8px rgba(28,100,214,0.4)" }}>
+              {busy ? "Looking up…" : "View my project"}
+            </button>
+            <button type="button" onClick={() => { setMode("choose"); setError(null); }}
+              className="w-full font-mono text-[11px]" style={{ color: C.faint }}>
+              Back
+            </button>
+          </form>
+        )}
+
+        <p className="font-mono text-[10px] text-center mt-6" style={{ color: C.faint }}>
+          Client access codes are issued by your project pilot.
+        </p>
+        <BuildStamp className="text-center mt-2" />
+      </div>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/*  Admin controls — create / edit / delete projects, manage client     */
+/*  access permissions                                                  */
+/* ------------------------------------------------------------------ */
+const TYPE_PRESETS = [
+  "Multifamily construction", "Retail build-out", "Residential listing",
+  "Land / grading", "Industrial / warehouse", "Other",
+];
+
+function FormField({ label, children }) {
+  return (
+    <div>
+      <label className="font-mono text-[10px] uppercase tracking-widest block mb-1.5" style={{ color: C.faint }}>{label}</label>
+      {children}
+    </div>
+  );
+}
+
+const inputStyle = { background: C.panel2, color: C.text, border: `1px solid ${C.line}` };
+
+function ProjectForm({ mode, initial, onCancel, onSave, onDelete }) {
+  const [projectMode, setProjectMode] = useState(initial?.mode === "realEstate" ? "realEstate" : "construction");
+  const [name, setName] = useState(initial?.name || "");
+  const [client, setClient] = useState(initial?.client || "");
+  const [address, setAddress] = useState(initial?.address || "");
+  const [type, setType] = useState(initial?.type || TYPE_PRESETS[0]);
+  const [iconKey, setIconKey] = useState(initial?.iconKey || "Building2");
+  const [lat, setLat] = useState(initial?.lat ?? "");
+  const [lon, setLon] = useState(initial?.lon ?? "");
+  const [clientAccessEnabled, setClientAccessEnabled] = useState(initial?.clientAccessEnabled ?? true);
+  const [accessCode, setAccessCode] = useState(initial?.accessCode || "");
+  const [copied, setCopied] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+
+  const regenerate = () => setAccessCode(generateAccessCode(initial?.id || name || "project"));
+  const copyCode = async () => {
+    try { await navigator.clipboard.writeText(accessCode); } catch {}
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1400);
+  };
+
+  const submit = (e) => {
+    e.preventDefault();
+    if (!name.trim()) return;
+    onSave({
+      id: initial?.id,
+      name: name.trim(),
+      client: client.trim() || "Unassigned",
+      address: address.trim(),
+      type,
+      iconKey,
+      lat: lat === "" ? 0 : Number(lat),
+      lon: lon === "" ? 0 : Number(lon),
+      mode: projectMode,
+      clientAccessEnabled,
+      accessCode: accessCode || defaultAccessCode(initial?.id || name),
+    });
+  };
+
+  return (
+    <div className="glass fixed inset-0 z-50 flex items-center justify-center p-5" style={{ background: "rgba(18,24,38,0.45)" }} onClick={onCancel}>
+      <form onSubmit={submit} onClick={(e) => e.stopPropagation()}
+        className="fade-in-up w-full max-w-lg rounded-2xl p-6 max-h-[90vh] overflow-y-auto"
+        style={{ background: C.panel, border: `1px solid ${C.line}`, boxShadow: "0 24px 60px -20px rgba(18,24,38,0.35)" }}>
+        <div className="flex items-center justify-between mb-5">
+          <div className="flex items-center gap-2">
+            <h3 className="font-display text-lg font-semibold" style={{ color: C.text }}>
+              {mode === "create" ? "New project" : "Edit project"}
+            </h3>
+            {mode === "edit" && (
+              <Badge tone={projectMode === "realEstate" ? "cyan" : "muted"}>
+                {projectMode === "realEstate" ? "Real estate" : "Construction"}
+              </Badge>
+            )}
+          </div>
+          <button type="button" onClick={onCancel}><X size={16} color={C.faint} /></button>
+        </div>
+
+        {mode === "create" && (
+          <div className="mb-4">
+            <FormField label="Project mode">
+              <div className="grid grid-cols-2 gap-2">
+                <button type="button" onClick={() => setProjectMode("construction")}
+                  className="rounded-lg px-3 py-2.5 text-left"
+                  style={{
+                    background: projectMode === "construction" ? C.cyan : C.panel2,
+                    border: `1px solid ${projectMode === "construction" ? C.cyan : C.line}`,
+                  }}>
+                  <div className="font-body text-xs font-semibold" style={{ color: projectMode === "construction" ? C.onAccent : C.text }}>Construction</div>
+                  <div className="font-mono text-[9.5px] mt-0.5" style={{ color: projectMode === "construction" ? "rgba(255,255,255,0.85)" : C.faint }}>
+                    Week-over-week flight tracking &amp; progress reports
+                  </div>
+                </button>
+                <button type="button" onClick={() => setProjectMode("realEstate")}
+                  className="rounded-lg px-3 py-2.5 text-left"
+                  style={{
+                    background: projectMode === "realEstate" ? C.cyan : C.panel2,
+                    border: `1px solid ${projectMode === "realEstate" ? C.cyan : C.line}`,
+                  }}>
+                  <div className="font-body text-xs font-semibold" style={{ color: projectMode === "realEstate" ? C.onAccent : C.text }}>Real estate</div>
+                  <div className="font-mono text-[9.5px] mt-0.5" style={{ color: projectMode === "realEstate" ? "rgba(255,255,255,0.85)" : C.faint }}>
+                    Aerial listing photos &amp; a draft MLS description
+                  </div>
+                </button>
+              </div>
+            </FormField>
+          </div>
+        )}
+
+        <div className="grid grid-cols-2 gap-4 mb-4">
+          <div className="col-span-2">
+            <FormField label="Project name">
+              <input required value={name} onChange={(e) => setName(e.target.value)}
+                className="w-full rounded-lg px-3 py-2 font-body text-sm outline-none" style={inputStyle} />
+            </FormField>
+          </div>
+          <FormField label="Client">
+            <input value={client} onChange={(e) => setClient(e.target.value)}
+              className="w-full rounded-lg px-3 py-2 font-body text-sm outline-none" style={inputStyle} />
+          </FormField>
+          <FormField label="Project type">
+            <select value={type} onChange={(e) => setType(e.target.value)}
+              className="w-full rounded-lg px-3 py-2 font-body text-sm outline-none" style={inputStyle}>
+              {TYPE_PRESETS.map((t) => <option key={t} value={t}>{t}</option>)}
+            </select>
+          </FormField>
+          <div className="col-span-2">
+            <FormField label="Address">
+              <input value={address} onChange={(e) => setAddress(e.target.value)}
+                className="w-full rounded-lg px-3 py-2 font-body text-sm outline-none" style={inputStyle} />
+            </FormField>
+          </div>
+          <FormField label="Icon">
+            <select value={iconKey} onChange={(e) => setIconKey(e.target.value)}
+              className="w-full rounded-lg px-3 py-2 font-body text-sm outline-none" style={inputStyle}>
+              {ICON_OPTIONS.map((k) => <option key={k} value={k}>{k}</option>)}
+            </select>
+          </FormField>
+          <div />
+          <FormField label="Latitude">
+            <input type="number" step="any" value={lat} onChange={(e) => setLat(e.target.value)}
+              className="w-full rounded-lg px-3 py-2 font-body text-sm outline-none" style={inputStyle} />
+          </FormField>
+          <FormField label="Longitude">
+            <input type="number" step="any" value={lon} onChange={(e) => setLon(e.target.value)}
+              className="w-full rounded-lg px-3 py-2 font-body text-sm outline-none" style={inputStyle} />
+          </FormField>
+        </div>
+
+        <div className="rounded-xl p-4 mb-5" style={{ background: C.panel2, border: `1px solid ${C.line}` }}>
+          <div className="flex items-center gap-1.5 mb-3 font-body text-sm font-medium" style={{ color: C.text }}>
+            <ShieldAlert size={14} color={C.orange} /> Access &amp; permissions
+          </div>
+          <label className="flex items-center justify-between mb-3 cursor-pointer">
+            <span className="font-body text-xs" style={{ color: C.muted }}>Allow client access with this project's code</span>
+            <input type="checkbox" checked={clientAccessEnabled} onChange={(e) => setClientAccessEnabled(e.target.checked)}
+              className="w-4 h-4 accent-blue-600" />
+          </label>
+          {mode === "edit" && (
+            <div className="flex items-center gap-2">
+              <div className="flex-1 flex items-center gap-2 rounded-lg px-3 py-2 font-mono text-xs tracking-widest"
+                style={{ background: C.panel, border: `1px solid ${C.line}`, color: C.text }}>
+                <KeyRound size={12} color={C.faint} /> {accessCode}
+              </div>
+              <button type="button" onClick={copyCode} className="btn-modern p-2 rounded-lg" style={{ background: C.panel, border: `1px solid ${C.line}` }}>
+                {copied ? <Check size={14} color={C.ok} /> : <Copy size={14} color={C.cyan} />}
+              </button>
+              <button type="button" onClick={regenerate} className="btn-modern p-2 rounded-lg" style={{ background: C.panel, border: `1px solid ${C.line}` }}>
+                <RefreshCw size={14} color={C.faint} />
+              </button>
+            </div>
+          )}
+          {mode === "create" && (
+            <p className="font-mono text-[10px]" style={{ color: C.faint }}>An access code is generated automatically once the project is created.</p>
+          )}
+        </div>
+
+        <div className="flex items-center justify-between gap-3">
+          {onDelete ? (
+            <button type="button"
+              onClick={() => (confirmDelete ? onDelete() : setConfirmDelete(true))}
+              className="btn-modern flex items-center gap-1.5 px-3 py-2 rounded-lg font-body text-xs font-medium"
+              style={{ background: "rgba(255,93,46,0.1)", color: C.orange }}>
+              <Trash2 size={13} /> {confirmDelete ? "Confirm delete" : "Delete project"}
+            </button>
+          ) : <span />}
+          <div className="flex items-center gap-2">
+            <button type="button" onClick={onCancel} className="font-body text-xs px-3 py-2" style={{ color: C.muted }}>Cancel</button>
+            <button type="submit" className="btn-modern px-4 py-2 rounded-lg font-body text-sm font-medium"
+              style={{ background: C.cyan, color: C.onAccent, boxShadow: "0 8px 24px -8px rgba(28,100,214,0.4)" }}>
+              {mode === "create" ? "Create project" : "Save changes"}
+            </button>
+          </div>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+function AdminControls({ sites, onCreate, onUpdate, onDelete }) {
+  const [editing, setEditing] = useState(null); // null | "new" | site id
+  const editingSite = editing && editing !== "new" ? sites.find((s) => s.id === editing) : null;
+
+  return (
+    <div>
+      <div className="flex items-start justify-between gap-3 mb-6 flex-wrap">
+        <div>
+          <div className="flex items-center gap-2 mb-1">
+            <Settings size={18} color={C.cyan} />
+            <h1 className="font-display text-2xl font-semibold" style={{ color: C.text }}>Admin controls</h1>
+          </div>
+          <p className="font-body text-sm" style={{ color: C.muted }}>
+            Set up, configure, and edit projects, and manage the access code each client needs to view their site.
+          </p>
+        </div>
+        <button onClick={() => setEditing("new")}
+          className="btn-modern flex items-center gap-1.5 px-3.5 py-2.5 rounded-lg font-body text-sm font-medium shrink-0"
+          style={{ background: C.cyan, color: C.onAccent, boxShadow: "0 8px 24px -8px rgba(28,100,214,0.4)" }}>
+          <Plus size={15} /> New project
+        </button>
+      </div>
+
+      <div className="space-y-3">
+        {sites.map((s) => {
+          const Icon = s.icon;
+          return (
+            <div key={s.id} className="rounded-xl p-4 flex items-center justify-between gap-3 flex-wrap"
+              style={{ background: C.panel, border: `1px solid ${C.line}` }}>
+              <div className="flex items-center gap-3 min-w-0">
+                <div className="w-9 h-9 rounded-lg flex items-center justify-center shrink-0" style={{ background: C.panel2 }}>
+                  <Icon size={16} color={C.cyan} />
+                </div>
+                <div className="min-w-0">
+                  <div className="font-body text-sm font-medium truncate" style={{ color: C.text }}>{s.name}</div>
+                  <div className="font-mono text-[11px] truncate" style={{ color: C.faint }}>{s.client} · {s.type}</div>
+                </div>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <Badge tone={s.mode === "realEstate" ? "cyan" : "muted"}>{s.mode === "realEstate" ? "Real estate" : "Construction"}</Badge>
+                <Badge tone={s.clientAccessEnabled ? "ok" : "muted"}>{s.clientAccessEnabled ? "Client access on" : "Client access off"}</Badge>
+                <span className="font-mono text-[11px] tracking-widest hidden sm:inline" style={{ color: C.faint }}>{s.accessCode}</span>
+                <button onClick={() => setEditing(s.id)} className="btn-modern p-2 rounded-lg" style={{ background: C.panel2, border: `1px solid ${C.line}` }}>
+                  <Pencil size={14} color={C.muted} />
+                </button>
+              </div>
+            </div>
+          );
+        })}
+        {!sites.length && (
+          <div className="rounded-xl p-8 text-center font-body text-sm" style={{ background: C.panel, border: `1px solid ${C.line}`, color: C.muted }}>
+            No projects yet. Create one to get started.
+          </div>
+        )}
+      </div>
+
+      {(editing === "new" || editingSite) && (
+        <ProjectForm
+          mode={editing === "new" ? "create" : "edit"}
+          initial={editingSite}
+          onCancel={() => setEditing(null)}
+          onSave={(data) => { editing === "new" ? onCreate(data) : onUpdate(data); setEditing(null); }}
+          onDelete={editingSite ? () => { onDelete(editingSite.id); setEditing(null); } : null}
+        />
+      )}
     </div>
   );
 }
@@ -1328,26 +2704,245 @@ function ClientPortal({ site, isPreview, onExitPreview, initialTab = "interactiv
 /*  Root app                                                            */
 /* ------------------------------------------------------------------ */
 export default function App() {
-  const [sites, setSites] = useState(() =>
-    SITES.map((s) => ({ ...s, _weeks: [1, 2, 3, 4, 5, 6].map((n) => ({ n, date: WEEK_DATES[n - 1], real: false })) }))
-  );
+  const supabaseMode = isSupabaseConfigured();
+  const [sites, setSites] = useState(() => (supabaseMode ? [] : (loadPersistedSites() ?? [])));
+  const [session, setSession] = useState(() => loadPersistedSession());
   const [view, setView] = useState("dashboard");
   const [activeSiteId, setActiveSiteId] = useState(null);
   const [clientPreview, setClientPreview] = useState(null); // { id, tab }
+  const [clientSiteData, setClientSiteData] = useState(null);
+  const [authReady, setAuthReady] = useState(!supabaseMode);
+  const [clientLoading, setClientLoading] = useState(false);
+  const [sitesLoading, setSitesLoading] = useState(supabaseMode);
+  const [dataError, setDataError] = useState(null);
+  const [localOnlySites, setLocalOnlySites] = useState([]);
+  const [importing, setImporting] = useState(false);
+
+  // Local (no-Supabase) persistence — unchanged from the original build. Once
+  // Supabase is configured it becomes the source of truth and this is skipped.
+  useEffect(() => { if (!supabaseMode) persistSites(sites); }, [sites, supabaseMode]);
+  useEffect(() => { persistSession(session); }, [session]);
+
+  // Restores the operator's Supabase auth session on load and reacts to
+  // sign-out happening elsewhere (another tab, an expired token).
+  useEffect(() => {
+    if (!supabaseMode) return;
+    let cancelled = false;
+    getOperatorSession().then((s) => {
+      if (cancelled) return;
+      setSession((prev) => {
+        if (s) return prev.role === "admin" ? prev : { role: "admin", siteId: null };
+        return prev.role === "admin" ? { role: null, siteId: null } : prev;
+      });
+      setAuthReady(true);
+    });
+    const unsubscribe = onOperatorAuthChange((s) => {
+      if (!s) setSession((prev) => (prev.role === "admin" ? { role: null, siteId: null } : prev));
+    });
+    return () => { cancelled = true; unsubscribe(); };
+  }, [supabaseMode]);
+
+  // Loads the signed-in operator's projects (and their flights) from Supabase.
+  useEffect(() => {
+    if (!supabaseMode || session.role !== "admin") return;
+    let cancelled = false;
+    setSitesLoading(true);
+    db.fetchOperatorSites()
+      .then((rows) => { if (!cancelled) setSites(rows.map(hydrateSite)); })
+      .catch((err) => { if (!cancelled) setDataError(err.message || "Couldn't load projects."); })
+      .finally(() => { if (!cancelled) setSitesLoading(false); });
+    return () => { cancelled = true; };
+  }, [supabaseMode, session.role]);
+
+  // Rehydrates a returning client session after a page reload — the project's
+  // access code (not any secret token) is kept in this browser's session record
+  // so the same SECURITY DEFINER lookup used at sign-in can run again.
+  useEffect(() => {
+    if (!supabaseMode || session.role !== "client" || !session.accessCode || clientSiteData) return;
+    let cancelled = false;
+    setClientLoading(true);
+    db.getSiteByAccessCode(session.accessCode)
+      .then((site) => { if (!cancelled) setClientSiteData(site ? hydrateSite(site) : null); })
+      .catch(() => { if (!cancelled) setClientSiteData(null); })
+      .finally(() => { if (!cancelled) setClientLoading(false); });
+    return () => { cancelled = true; };
+  }, [supabaseMode, session.role, session.accessCode, clientSiteData]);
+
+  // Projects created before cloud sync was switched on live only in this browser's
+  // storage; surface them once the cloud list has loaded so they can be uploaded
+  // instead of silently disappearing from view.
+  useEffect(() => {
+    if (!supabaseMode || session.role !== "admin" || sitesLoading) return;
+    setLocalOnlySites(pendingLocalImports(sites));
+  }, [supabaseMode, session.role, sitesLoading]);
+
+  const importLocalProjects = async () => {
+    // A retry after a partial upload must skip rows that already made it up.
+    const skipIfAlreadyUploaded = (pkey) => (err) => {
+      if (!String(err?.message).includes(`"${pkey}"`)) throw err;
+    };
+    setImporting(true);
+    let cloudSites = sites;
+    try {
+      for (const site of localOnlySites) {
+        setImportState(site.id, "started");
+        await db.createSite(site).catch(skipIfAlreadyUploaded("sites_pkey"));
+        // Legacy flights have no id; derive a stable one so a retry hits the same row.
+        const weeks = renumberWeeksByDate((site._weeks || []).map((w) => ({ ...w, id: w.id || `${site.id}-legacy-w${w.n}` })));
+        for (const w of weeks) await db.addFlight(site.id, w).catch(skipIfAlreadyUploaded("flights_pkey"));
+        setImportState(site.id, "done");
+      }
+    } catch (err) {
+      setDataError(`Upload stopped partway: ${err.message || err}. Anything already uploaded is safe; click Upload again to finish.`);
+    } finally {
+      try { cloudSites = (await db.fetchOperatorSites()).map(hydrateSite); setSites(cloudSites); } catch {}
+      setLocalOnlySites(pendingLocalImports(cloudSites));
+      setImporting(false);
+    }
+  };
 
   const openSite = (id) => { setActiveSiteId(id); setView("site"); };
   const previewClient = (id, tab = "interactive") => setClientPreview({ id, tab });
+  const signOut = () => {
+    if (supabaseMode) signOutOperator().catch(() => {});
+    setSession({ role: null, siteId: null });
+    setView("dashboard"); setActiveSiteId(null); setClientPreview(null); setClientSiteData(null);
+  };
 
   const handleIngested = (siteId, weekEntry) => {
-    setSites((prev) => prev.map((s) => (s.id === siteId ? { ...s, _weeks: [...s._weeks, weekEntry] } : s)));
+    const prevWeeks = sites.find((s) => s.id === siteId)?._weeks || [];
+    const renumbered = renumberWeeksByDate([...prevWeeks, weekEntry]);
+    setSites((prev) => prev.map((s) => (s.id === siteId ? { ...s, _weeks: renumbered } : s)));
+    if (supabaseMode) {
+      const inserted = renumbered.find((w) => w.id === weekEntry.id) || weekEntry;
+      db.addFlight(siteId, inserted)
+        .then(() => db.updateFlightNumbers(siteId, renumbered.filter((w) => w.id !== weekEntry.id)))
+        .catch((err) => setDataError(err.message));
+    }
+  };
+
+  const handleIngestedListing = (siteId, listingUpdate) => {
+    setSites((prev) => prev.map((s) => (s.id === siteId
+      ? { ...s, listing: { ...(s.listing || {}), ...listingUpdate } }
+      : s)));
+    if (supabaseMode) {
+      const merged = { ...(sites.find((s) => s.id === siteId)?.listing || {}), ...listingUpdate };
+      db.updateListing(siteId, merged).catch((err) => setDataError(err.message));
+    }
+  };
+
+  const updateListingDescription = (siteId, description, descriptionMode) => {
+    setSites((prev) => prev.map((s) => (s.id === siteId
+      ? { ...s, listing: { ...(s.listing || {}), description, descriptionMode } }
+      : s)));
+    if (supabaseMode) {
+      const merged = { ...(sites.find((s) => s.id === siteId)?.listing || {}), description, descriptionMode };
+      db.updateListing(siteId, merged).catch((err) => setDataError(err.message));
+    }
+  };
+
+  const updateWeekTrades = (siteId, weekN, trades) => {
+    setSites((prev) => prev.map((s) => (s.id === siteId
+      ? { ...s, _weeks: s._weeks.map((w) => (w.n === weekN ? { ...w, trades } : w)) }
+      : s)));
+    if (supabaseMode) db.updateFlightTrades(siteId, weekN, trades).catch((err) => setDataError(err.message));
+  };
+
+  const updateWeekNote = (siteId, weekN, note, noteMode) => {
+    setSites((prev) => prev.map((s) => (s.id === siteId
+      ? { ...s, _weeks: s._weeks.map((w) => (w.n === weekN ? { ...w, note, noteMode } : w)) }
+      : s)));
+    if (supabaseMode) db.updateFlightNote(siteId, weekN, note, noteMode).catch((err) => setDataError(err.message));
+  };
+
+  const addWeekMedia = (siteId, weekN, item) => {
+    let nextMedia = [item];
+    setSites((prev) => prev.map((s) => (s.id === siteId
+      ? { ...s, _weeks: s._weeks.map((w) => {
+          if (w.n !== weekN) return w;
+          nextMedia = [...(w.media || []), item];
+          return { ...w, media: nextMedia };
+        }) }
+      : s)));
+    if (supabaseMode) db.updateFlightMedia(siteId, weekN, nextMedia).catch((err) => setDataError(err.message));
+  };
+
+  const removeWeekMedia = (siteId, weekN, mediaId) => {
+    let nextMedia = [];
+    setSites((prev) => prev.map((s) => (s.id === siteId
+      ? { ...s, _weeks: s._weeks.map((w) => {
+          if (w.n !== weekN) return w;
+          nextMedia = (w.media || []).filter((m) => m.id !== mediaId);
+          return { ...w, media: nextMedia };
+        }) }
+      : s)));
+    if (supabaseMode) db.updateFlightMedia(siteId, weekN, nextMedia).catch((err) => setDataError(err.message));
+  };
+
+  const createProject = (data) => {
+    const project = makeNewProject(data, sites.map((s) => s.id));
+    setSites((prev) => [...prev, project]);
+    if (supabaseMode) db.createSite(project).catch((err) => setDataError(err.message));
+  };
+  const updateProject = (data) => {
+    setSites((prev) => prev.map((s) => (s.id === data.id ? { ...s, ...data, icon: resolveIcon(data.iconKey) } : s)));
+    if (supabaseMode) db.updateSite(data).catch((err) => setDataError(err.message));
+  };
+  const deleteProject = (id) => {
+    setSites((prev) => prev.filter((s) => s.id !== id));
+    if (activeSiteId === id) { setActiveSiteId(null); setView("dashboard"); }
+    if (supabaseMode) db.deleteSite(id).catch((err) => setDataError(err.message));
   };
 
   const activeSite = sites.find((s) => s.id === activeSiteId);
 
+  const clientSite = session.role === "client"
+    ? (supabaseMode ? clientSiteData : sites.find((s) => s.id === session.siteId))
+    : null;
+  const clientAccessValid = !!(clientSite && clientSite.clientAccessEnabled);
+
+  useEffect(() => {
+    if (session.role === "client" && clientSite && !clientAccessValid) setSession({ role: null, siteId: null });
+  }, [session.role, clientSite, clientAccessValid]);
+
+  if (!authReady || clientLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center font-body" style={{ background: C.bg }}>
+        <Loader2 className="animate-spin" size={22} color={C.cyan} />
+      </div>
+    );
+  }
+
+  if (session.role === null || (session.role === "client" && !clientAccessValid)) {
+    return (
+      <AccessGate sites={sites} supabaseMode={supabaseMode}
+        onAdminLogin={() => setSession({ role: "admin", siteId: null })}
+        onClientAccess={(id, siteData, accessCode) => {
+          if (siteData) setClientSiteData(hydrateSite(siteData));
+          setSession({ role: "client", siteId: id, accessCode });
+        }} />
+    );
+  }
+
+  if (session.role === "client") {
+    return <ClientPortal site={clientSite} mode="client" onExitPreview={signOut} />;
+  }
+
+  if (supabaseMode && sitesLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center font-body" style={{ background: C.bg }}>
+        <div className="flex flex-col items-center gap-3">
+          <Loader2 className="animate-spin" size={22} color={C.cyan} />
+          <div className="font-mono text-[11px]" style={{ color: C.faint }}>Loading your projects…</div>
+        </div>
+      </div>
+    );
+  }
+
   if (clientPreview) {
     const previewSite = sites.find((s) => s.id === clientPreview.id);
     return (
-      <ClientPortal site={previewSite} isPreview initialTab={clientPreview.tab}
+      <ClientPortal site={previewSite} mode="preview" initialTab={clientPreview.tab}
         onExitPreview={() => setClientPreview(null)} />
     );
   }
@@ -1358,16 +2953,14 @@ export default function App() {
 
       {/* ambient background glow — signature modern touch, quiet and slow */}
       <div className="ambient-glow pointer-events-none fixed -top-40 -left-32 w-[560px] h-[560px] rounded-full"
-        style={{ background: "radial-gradient(circle, rgba(62,214,196,0.16), transparent 70%)", filter: "blur(10px)", zIndex: 0 }} />
+        style={{ background: "radial-gradient(circle, rgba(28,100,214,0.14), transparent 70%)", filter: "blur(10px)", zIndex: 0 }} />
       <div className="ambient-glow pointer-events-none fixed -bottom-52 -right-40 w-[620px] h-[620px] rounded-full"
-        style={{ background: "radial-gradient(circle, rgba(255,93,46,0.12), transparent 70%)", filter: "blur(10px)", zIndex: 0, animationDelay: "-7s" }} />
+        style={{ background: "radial-gradient(circle, rgba(126,193,250,0.20), transparent 70%)", filter: "blur(10px)", zIndex: 0, animationDelay: "-7s" }} />
 
       <aside className="glass w-56 shrink-0 p-4 flex-col gap-1 hidden md:flex relative z-10"
-        style={{ borderRight: `1px solid ${C.line}`, background: "rgba(17,22,29,0.6)" }}>
+        style={{ borderRight: `1px solid ${C.line}`, background: "rgba(255,255,255,0.72)" }}>
         <div className="flex items-center gap-2 px-2 mb-6">
-          <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ background: C.orange, boxShadow: "0 6px 18px -6px rgba(255,93,46,0.5)" }}>
-            <Crosshair size={16} color="#160C05" />
-          </div>
+          <Logo size={34} />
           <div>
             <div className="font-display text-sm font-semibold leading-none" style={{ color: C.text }}>Wisconsin</div>
             <div className="font-mono text-[9px] tracking-widest" style={{ color: C.faint }}>AERIAL</div>
@@ -1376,32 +2969,86 @@ export default function App() {
         <NavButton active={view === "dashboard"} icon={Home} label="Dashboard" onClick={() => setView("dashboard")} />
         <NavButton active={view === "ingest"} icon={FolderInput} label="Receiving engine" onClick={() => setView("ingest")} />
         <NavButton active={view === "quick"} icon={ArrowLeftRight} label="Quick compare" onClick={() => setView("quick")} />
-        <div className="mt-6 px-2 font-mono text-[9px] uppercase tracking-widest" style={{ color: C.faint }}>Sites</div>
-        {sites.map((s) => (
-          <NavButton key={s.id} active={view === "site" && activeSiteId === s.id} icon={s.icon}
-            label={s.name.split(" — ")[0].split(" Estates")[0]}
-            onClick={() => openSite(s.id)} />
-        ))}
-        <div className="mt-auto px-2 pt-4 font-mono text-[9px]" style={{ color: C.faint, borderTop: `1px solid ${C.line}` }}>
-          <div className="pt-3">v0.1 · demo build</div>
+        <NavButton active={view === "admin"} icon={Settings} label="Admin controls" onClick={() => setView("admin")} />
+        {sites.length > 0 && (
+          <>
+            <div className="mt-6 px-2 font-mono text-[9px] uppercase tracking-widest" style={{ color: C.faint }}>Sites</div>
+            {sites.map((s) => (
+              <NavButton key={s.id} active={view === "site" && activeSiteId === s.id} icon={s.icon}
+                label={s.name.split(" — ")[0].split(" Estates")[0]}
+                onClick={() => openSite(s.id)} />
+            ))}
+          </>
+        )}
+        <div className="mt-auto px-2 pt-4" style={{ borderTop: `1px solid ${C.line}` }}>
+          <button onClick={signOut} className="btn-modern w-full flex items-center gap-2 pt-3 font-mono text-[10px]" style={{ color: C.faint }}>
+            <LogOut size={12} /> Sign out (admin)
+          </button>
+          <BuildStamp className="mt-2" />
         </div>
       </aside>
 
       {/* mobile top nav */}
-      <div className="glass md:hidden fixed top-0 left-0 right-0 z-10 flex items-center gap-1 p-2 overflow-x-auto"
-        style={{ background: "rgba(17,22,29,0.75)", borderBottom: `1px solid ${C.line}` }}>
+      <div className="glass md:hidden fixed top-0 left-0 right-0 z-30 flex items-center gap-1 p-2 overflow-x-auto"
+        style={{ background: "rgba(255,255,255,0.85)", borderBottom: `1px solid ${C.line}` }}>
         <button onClick={() => setView("dashboard")} className="btn-modern p-2 rounded-lg shrink-0" style={{ background: view === "dashboard" ? C.panel2 : "transparent" }}><Home size={16} color={C.text} /></button>
         <button onClick={() => setView("ingest")} className="btn-modern p-2 rounded-lg shrink-0" style={{ background: view === "ingest" ? C.panel2 : "transparent" }}><FolderInput size={16} color={C.text} /></button>
         <button onClick={() => setView("quick")} className="btn-modern p-2 rounded-lg shrink-0" style={{ background: view === "quick" ? C.panel2 : "transparent" }}><ArrowLeftRight size={16} color={C.text} /></button>
+        <button onClick={() => setView("admin")} className="btn-modern p-2 rounded-lg shrink-0" style={{ background: view === "admin" ? C.panel2 : "transparent" }}><Settings size={16} color={C.text} /></button>
+        <button onClick={signOut} className="btn-modern p-2 rounded-lg shrink-0 ml-auto"><LogOut size={16} color={C.faint} /></button>
       </div>
 
       <main className="flex-1 p-5 md:p-8 pt-16 md:pt-8 max-w-4xl relative z-10">
-        {view === "dashboard" && <Dashboard sites={sites} onOpen={openSite} />}
-        {view === "site" && activeSite && (
-          <SiteDetail site={activeSite} onBack={() => setView("dashboard")} onPreviewClient={previewClient} />
+        {!supabaseMode && (
+          <div className="mb-4 flex items-start gap-2 px-3.5 py-2.5 rounded-xl font-body text-xs"
+            style={{ background: "#FFF7E6", border: "1px solid #F2C46D", color: "#7A5300" }}>
+            <AlertCircle size={14} className="shrink-0 mt-0.5" />
+            <span>
+              <strong>Saved on this device only.</strong> Projects here won't appear on your other devices, and client
+              access codes only work in this browser, until cloud sync is set up.
+            </span>
+          </div>
         )}
-        {view === "ingest" && <ReceivingEngine sites={sites} onIngested={handleIngested} onOpenSite={openSite} />}
+        {supabaseMode && localOnlySites.length > 0 && (
+          <div className="mb-4 flex items-center gap-3 px-3.5 py-2.5 rounded-xl font-body text-xs flex-wrap"
+            style={{ background: C.panel2, border: `1px solid ${C.cyanDim}`, color: C.text }}>
+            <Upload size={14} color={C.cyan} className="shrink-0" />
+            <span className="flex-1 min-w-[12rem]">
+              {localOnlySites.length} project{localOnlySites.length === 1 ? " is" : "s are"} saved only in this browser
+              ({localOnlySites.map((s) => s.name).join(", ")}). Upload to make {localOnlySites.length === 1 ? "it" : "them"} available
+              on every device.
+            </span>
+            <button onClick={importLocalProjects} disabled={importing}
+              className="btn-modern px-3 py-1.5 rounded-lg font-body text-xs font-medium disabled:opacity-60"
+              style={{ background: C.cyan, color: C.onAccent }}>
+              {importing ? "Uploading…" : "Upload to cloud"}
+            </button>
+          </div>
+        )}
+        {dataError && (
+          <div className="fade-in-up mb-4 flex items-center gap-2 px-3.5 py-2.5 rounded-xl font-body text-xs"
+            style={{ background: "#FFF1EC", border: `1px solid ${C.orange}`, color: C.orange }}>
+            <AlertCircle size={14} />
+            <span className="flex-1">{dataError}</span>
+            <button onClick={() => setDataError(null)} className="font-mono text-[10px] uppercase tracking-widest">Dismiss</button>
+          </div>
+        )}
+        {view === "dashboard" && <Dashboard sites={sites} onOpen={openSite} onGoToAdmin={() => setView("admin")} />}
+        {view === "site" && activeSite && (
+          <SiteDetail site={activeSite} onBack={() => setView("dashboard")} onPreviewClient={previewClient}
+            onGoToIngest={() => setView("ingest")} onUpdateTrades={updateWeekTrades}
+            onUpdateNote={updateWeekNote} onAddMedia={addWeekMedia} onRemoveMedia={removeWeekMedia}
+            onUpdateListingDescription={updateListingDescription} />
+        )}
+        {view === "ingest" && (
+          <ReceivingEngine sites={sites} onIngested={handleIngested} onIngestedListing={handleIngestedListing}
+            onOpenSite={openSite} onGoToAdmin={() => setView("admin")} />
+        )}
         {view === "quick" && <QuickCompare />}
+        {view === "admin" && (
+          <AdminControls sites={sites} onCreate={createProject} onUpdate={updateProject} onDelete={deleteProject} />
+        )}
+        <BuildStamp className="md:hidden mt-10 text-center" />
       </main>
     </div>
   );
